@@ -119,3 +119,54 @@ class AITestClient:
         print(f"总 Tokens: {usage['total_tokens']}")
         print(f"回复前 100 字: {content[:100]}..." if len(content) > 100 else f"回复全文: {content}")
         print(f"finish_reason: {response.choices[0].finish_reason if response.choices else 'N/A'}")
+
+    def chat_with_params(self, messages, **kwargs):
+        """
+        带自定义参数的聊天请求，用于边界测试。
+
+        参数:
+            messages: 消息列表
+            temperature: 温度 (0-2)，默认 0.7
+            max_tokens: 最大 Token 数，默认 1024
+            timeout: 超时秒数，默认 30
+            seed: 随机种子，固定后可复现回复（DeepSeek 支持）
+        """
+        params = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", 0.7),
+            "max_tokens": kwargs.get("max_tokens", 1024),
+            "timeout": kwargs.get("timeout", 30),
+        }
+
+        if "seed" in kwargs:
+            params["extra_body"] = {"seed": kwargs["seed"]}
+
+        try:
+            response = self.client.chat.completions.create(**params)
+            return response
+        except RateLimitError:
+            raise RuntimeError("API 限流")
+        except APIConnectionError:
+            raise RuntimeError("网络连接失败")
+        except APIError as e:
+            raise RuntimeError(f"API 错误 (status={e.status_code}): {e}")
+        except Exception as e:
+            raise RuntimeError(f"未知错误: {e}")
+
+    def print_params_response(self, response, label=""):
+        """打印带参数的响应详情，用于边界测试对比"""
+        content = self.get_reply_text(response)
+        usage = self.get_token_usage(response)
+        finish_reason = response.choices[0].finish_reason if response.choices else "N/A"
+
+        prefix = f"[{label}] " if label else ""
+        print(f"\n{prefix}--- 参数响应 ---")
+        print(f"  回复长度: {len(content)} 字符")
+        print(f"  Prompt Tokens: {usage['prompt_tokens']}")
+        print(f"  Completion Tokens: {usage['completion_tokens']}")
+        print(f"  finish_reason: {finish_reason}")
+        if len(content) > 60:
+            print(f"  回复前 60 字: {content[:60]}...")
+        else:
+            print(f"  回复全文: {content}")
