@@ -57,7 +57,7 @@ class AITestClient:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 1024,
-        timeout: int = 30,
+        timeout: int = 300,
     ) -> Dict:
         """
         发送聊天请求
