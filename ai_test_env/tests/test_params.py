@@ -1,19 +1,23 @@
-"""
-Day 2 - 参数边界测试
+"""Day 2 - 参数边界测试
 
-学习目标：用边界值分析和等价类划分法测试 AI API 参数。
+功能说明：
+    用边界值分析和等价类划分法测试 AI API 参数，建立参数基线数据。
+
+作者：测试团队
+创建日期：2024年
+版本：1.0.0
 
 测试内容：
-1. max_tokens 边界测试（1 / 10 / 2048）
-2. temperature 对比测试（0 / 0.7 / 2.0）
-3. 异常参数测试（负数 / 超大值）
-4. 参数组合测试（低 temperature + 小 max_tokens）
+    1. max_tokens 边界测试（1 / 10 / 2048）
+    2. temperature 对比测试（0 / 0.3 / 0.7 / 1.5 / 2.0）
+    3. temperature=0 一致性验证（多次请求对比）
+    4. 异常参数测试（负数 / 超大值 / 超范围）
 
-面试话术：
-"我做了完整的参数边界测试，覆盖了 max_tokens、temperature 的
-边界值和等价类。发现 temperature=0 时一致性最好，适合金融场景；
-temperature>1.5 后回复质量明显下降，不建议生产环境使用。
-这些数据是我在搭建环境第二天就建立的参数基线。"
+面试话术参考：
+    "我做了完整的参数边界测试，覆盖了 max_tokens、temperature 的
+    边界值和等价类。发现 temperature=0 时一致性最好，适合金融场景；
+    temperature>1.5 后回复质量明显下降，不建议生产环境使用。
+    这些数据是我在搭建环境第二天就建立的参数基线。"
 """
 import os
 import sys
@@ -26,18 +30,22 @@ from utils.api_client import AITestClient
 from dotenv import load_dotenv
 
 
-# ---------------------------------------------------------------------------
-# max_tokens 边界测试
-# ---------------------------------------------------------------------------
-
 def test_max_tokens_boundary(client):
-    """测试 max_tokens 的边界值：1 / 10 / 2048"""
+    """测试 1：max_tokens 的边界值测试
+
+    验证不同 max_tokens 值下的响应行为，包括最小值、中间值和最大值。
+
+    Args:
+        client: AITestClient 实例
+    """
     print("\n" + "=" * 50)
     print("[Test 1] max_tokens 边界测试")
     print("=" * 50)
 
+    # 构造需要较长回复的请求
     messages = [{"role": "user", "content": "给我写一篇 500 字的文章，介绍 Python 编程语言。"}]
 
+    # 测试边界值：1（最小）、10（较小）、2048（较大）
     boundaries = [1, 10, 2048]
     for mt in boundaries:
         try:
@@ -46,23 +54,27 @@ def test_max_tokens_boundary(client):
         except Exception as e:
             print(f"\n[max_tokens={mt}] [FAIL] {e}")
 
-    # 总结
+    # 输出测试结论
     print("\n>> 结论：max_tokens 是硬性上限。设为 1 或 10 时, finish_reason='length' 表示被截断。")
     print(">> 生产环境需要根据实际回复长度设置合理的 max_tokens，预留 30%-50% 余量。")
 
 
-# ---------------------------------------------------------------------------
-# temperature 对比测试
-# ---------------------------------------------------------------------------
-
 def test_temperature_comparison(client):
-    """测试不同 temperature 下回复的差异"""
+    """测试 2：不同 temperature 下回复的差异对比
+
+    验证温度参数对回复随机性的影响，为不同业务场景选择合适的值。
+
+    Args:
+        client: AITestClient 实例
+    """
     print("\n" + "=" * 50)
     print("[Test 2] temperature 对比测试")
     print("=" * 50)
 
+    # 使用简单的测试问题
     messages = [{"role": "user", "content": "用一句话说明什么是 API。"}]
 
+    # 定义测试的温度值及其适用场景
     temps = [
         (0.0, "完全确定（金融/法律场景）"),
         (0.3, "低随机性（客服/保险场景）"),
@@ -71,6 +83,7 @@ def test_temperature_comparison(client):
         (2.0, "极限值（几乎胡言乱语）"),
     ]
 
+    # 逐一测试不同温度值
     for temp, desc in temps:
         try:
             response = client.chat_with_params(messages, temperature=temp)
@@ -80,18 +93,27 @@ def test_temperature_comparison(client):
         except Exception as e:
             print(f"\n--- temperature={temp} [FAIL] {e}")
 
+    # 输出测试结论
     print("\n>> 结论：temperature 控制回复的随机性，值越大差异越明显。")
     print(">> 生产环境应根据场景选择合适的值，金融/法律类建议 0-0.3，通用类 0.7。")
 
 
 def test_temperature_consistency(client):
-    """验证 temperature=0 时的回复一致性"""
+    """测试 3：temperature=0 时的回复一致性验证
+
+    验证在固定 seed 的情况下，temperature=0 是否能产生一致的回复。
+
+    Args:
+        client: AITestClient 实例
+    """
     print("\n" + "=" * 50)
     print("[Test 3] temperature=0 一致性验证")
     print("=" * 50)
 
+    # 使用简单的测试问题
     messages = [{"role": "user", "content": "用一句话说明什么是 API。"}]
 
+    # 多次请求（固定 seed 以确保可复现）
     replies = []
     for i in range(3):
         response = client.chat_with_params(messages, temperature=0, seed=42)
@@ -99,32 +121,38 @@ def test_temperature_consistency(client):
         replies.append(reply)
         print(f"第 {i+1} 次回复: {reply[:60]}...")
 
-    # 比较一致性
+    # 比较三次回复的一致性
     if replies[0] == replies[1] == replies[2]:
         print("\n--> temperature=0 + seed=42: 三次回复完全一致 [OK]")
     else:
+        # 计算单词重叠率作为一致性指标
         common_words = len(set(replies[0].split()) & set(replies[1].split()) & set(replies[2].split()))
         total_words = max(len(set(replies[0].split())), 1)
         similarity = common_words / total_words
         print(f"\n--> 三次回复不完全一致，单词重叠率: {similarity:.0%}")
         print("--> 提示：temperature=0 也不保证 100% 一致，可尝试加 seed 参数")
 
+    # 输出测试结论
     print("\n>> 结论：temperature=0 + seed 能获得高度一致的回复。")
     print(">> 但如果业务场景要求'完全一致'，还需要在测试中验证多次。")
 
 
-# ---------------------------------------------------------------------------
-# 异常参数测试
-# ---------------------------------------------------------------------------
-
 def test_invalid_params(client):
-    """测试异常参数输入"""
+    """测试 4：异常参数输入测试
+
+    验证 API 对非法参数的处理能力，包括负数、零、超范围值等。
+
+    Args:
+        client: AITestClient 实例
+    """
     print("\n" + "=" * 50)
     print("[Test 4] 异常参数测试")
     print("=" * 50)
 
+    # 使用简单的测试消息
     messages = [{"role": "user", "content": "你好"}]
 
+    # 定义异常参数测试用例
     invalid_cases = [
         ("temperature=-1", {"temperature": -1}),
         ("temperature=3.0", {"temperature": 3.0}),
@@ -132,6 +160,7 @@ def test_invalid_params(client):
         ("max_tokens=-100", {"max_tokens": -100}),
     ]
 
+    # 逐一测试异常参数
     for name, params in invalid_cases:
         try:
             response = client.chat_with_params(messages, **params)
@@ -141,20 +170,18 @@ def test_invalid_params(client):
             print(f"\n--- {name} ---")
             print(f"  [PASS] 被正确拦截: {e}")
 
+    # 输出测试结论
     print("\n>> 结论：API 对异常参数的防护能力如下：")
     print(">> - temperature 超出范围：自动限幅或报错")
     print(">> - max_tokens 为 0 或负数：不同 API 行为不同，需验证")
 
 
-# ---------------------------------------------------------------------------
-# 主流程
-# ---------------------------------------------------------------------------
-
 def main():
+    """主函数：执行所有参数边界测试"""
     print("-- Day 2 - 参数边界测试 --")
     print("=" * 50)
 
-    # 加载 .env
+    # 加载环境配置
     env_path = Path(__file__).resolve().parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path)
@@ -169,13 +196,13 @@ def main():
         print(f"\n[FAIL] {e}")
         return
 
-    # 执行测试
+    # 执行各项测试
     test_max_tokens_boundary(client)
     test_temperature_comparison(client)
     test_temperature_consistency(client)
     test_invalid_params(client)
 
-    # 汇总
+    # 汇总测试内容
     print("\n" + "=" * 50)
     print("Day 2 参数边界测试完成")
     print("=" * 50)
@@ -186,6 +213,7 @@ def main():
     print("  temperature 一致性验证（3 次请求对比）")
     print()
 
+    # 面试准备提示
     print("面试准备：")
     print('  "我用边界值分析和等价类划分方法测试了 max_tokens、temperature')
     print('   等核心参数，记录了每个边界下的回复长度、finish_reason、')
