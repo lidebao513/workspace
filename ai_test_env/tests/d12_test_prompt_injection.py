@@ -9,6 +9,8 @@ Day 12 (Week 3 Day 2) — Prompt Injection 攻击防御测试
 import sys
 import os
 import unittest
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestReturnNotNoneWarning")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.d12_prompt_injection_tester import (

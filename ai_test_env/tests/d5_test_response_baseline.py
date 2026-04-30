@@ -29,6 +29,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestReturnNotNoneWarning")
+
 from utils.d1_api_client import AITestClient
 from utils.d4_response_validator import ResponseValidator
 from dotenv import load_dotenv

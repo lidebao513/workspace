@@ -14,6 +14,8 @@ Day 23 — 指数退避重试引擎测试
 import sys
 import os
 import unittest
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestReturnNotNoneWarning")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.d23_retry_engine import RetryEngine, RetryStrategy, RetryStats, retry

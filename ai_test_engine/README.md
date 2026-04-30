@@ -35,11 +35,29 @@ ai_test_engine/
 - **API 客户端封装** — OpenAI SDK 封装，支持同步/流式
 - **Key 管理** — 多 Key 轮换 + 模型降级 + 失败计数
 - **错误分级** — FATAL/ERROR/WARN/INFO 四级体系 + 告警规则
-- **冒烟测试** — 61 个用例覆盖参数边界/错误分类/消息格式
-- **质量评估** — 5 维评分 + LLM-as-Judge + 一致性检查 + Token 优化
-- **安全测试** — 9 类注入攻击 + 6 种健壮性扰动的测试
+- **冒烟测试** — 62 个用例覆盖参数边界/错误分类/消息格式
+- **质量评估** — 5 维评分 + LLM-as-Judge + 流水线
+- **安全测试** — 9 类注入攻击 + 6 种健壮性扰动 + 回归对比
 - **性能测试** — 并发压测 P95/P99 + 三态熔断器 + Token 审计
-- **CI/CD** — GitHub Actions workflow + 4 级门禁策略
+- **CI/CD** — GitHub Actions workflow + 3 Python 版本矩阵
+- **知识点回调测试** — 33 个测试验证每篇学习文档的核心知识点
+
+## Test Results
+
+```
+194 passed in 0.51s
+```
+
+| Module | Tests |
+|--------|-------|
+| smoke (connectivity) | 26 |
+| smoke (boundary) | 20 |
+| smoke (errors) | 16 |
+| quality | 13 |
+| security | 14 |
+| performance | 17 |
+| integration | 55 |
+| knowledge docs | 33 |
 
 ## Configuration
 
@@ -55,4 +73,4 @@ ai_test_engine/
 
 ## 面试话术
 
-> "我搭建了一个完整的 AI 测试引擎，覆盖从 API 连通性到生产级错误体系的 8 个维度。核心设计是分层架构——基础层（客户端/配置/错误处理）、测试层（冒烟/质量/安全/性能）、报告层（集成报告/告警）。共 350+ 测试用例，CI 集成 GitHub Actions。"
+> "我搭建了一个完整的 AI 测试引擎，覆盖从 API 连通性到生产级错误体系的 8 个维度。核心设计是分层架构——基础层（客户端/配置/错误处理）、测试层（冒烟/质量/安全/性能）、报告层（集成报告/告警）。共 194 个测试用例全部通过，0.5 秒跑完，CI 集成 GitHub Actions 3 版本矩阵。"

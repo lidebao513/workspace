@@ -13,6 +13,8 @@ import sys
 import os
 import time
 import unittest
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestReturnNotNoneWarning")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.d22_load_tester import LoadTester, LatencyReport

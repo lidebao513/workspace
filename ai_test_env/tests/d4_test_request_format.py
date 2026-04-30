@@ -32,6 +32,9 @@ from utils.d1_api_client import AITestClient
 from utils.d3_error_classifier import ErrorClassifier, ErrorCategory
 from dotenv import load_dotenv
 
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestReturnNotNoneWarning")
+
 
 def test_full_structure(client):
     """测试 1：完整结构（system + user + assistant + user）

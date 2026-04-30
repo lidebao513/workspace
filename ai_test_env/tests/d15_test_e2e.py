@@ -9,6 +9,8 @@ Day 15 (Week 3 Day 5) — E2E 业务场景测试
 import sys
 import os
 import unittest
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestReturnNotNoneWarning")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.d15_e2e_tester import (
