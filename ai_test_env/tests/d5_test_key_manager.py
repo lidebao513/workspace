@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.key_manager import (
+from utils.d5_key_manager import (
     KeyPoolManager, DegradeManager,
     KeyStatus, RotateStrategy, DegradeStep
 )

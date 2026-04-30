@@ -229,7 +229,113 @@ DeepSeek 官方定价（2026年）：
 
 ---
 
-## 三、代码设计：响应验证器
+### 2.4 JSON 数据格式——API 通信的"通用语言"
+
+**一句话定义：** JSON（JavaScript Object Notation）是一种轻量级的数据交换格式，它把结构化数据变成文本，方便程序之间读写。
+
+**类比：填表 vs 手写**
+```
+手写（无序的）：
+  张三，今年 28 岁，在北京工作
+  → 程序读这个费劲：哪个是姓名？哪个是城市？
+
+填表（JSON 的思维）：
+  姓名：张三
+  年龄：28
+  城市：北京
+  → 每个字段都有名字，程序一眼就能看懂
+```
+
+**JSON 的四种基本结构：**
+```json
+// 1. 对象（Object）—— 用 {} 包起来的一堆键值对
+{
+  "name": "张三",
+  "age": 28
+}
+
+// 2. 数组（Array）—— 用 [] 包起来的一堆值
+["苹果", "香蕉", "橘子"]
+
+// 3. 基础值——字符串、数字、布尔、null
+"hello"     // 字符串
+42          // 数字
+true        // 布尔
+null        // 空
+
+// 4. 嵌套——对象里套数组，数组里套对象
+{
+  "name": "张三",
+  "hobbies": ["编程", "读书"],  // 数组套在对象里
+  "address": {
+    "city": "北京",
+    "zip": "100000"
+  }           // 对象套在对象里
+}
+```
+
+**API 响应的 JSON 结构（这就是 Day 4 在操作的对象）：**
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1714200000,
+  "model": "deepseek-chat",
+  "choices": [              // ← 数组（可能有多个回复）
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",  // ← 嵌套对象
+        "content": "你好！有什么可以帮助你的？"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 27,
+    "completion_tokens": 25,
+    "total_tokens": 52
+  }
+}
+
+// 访问路径（就是一层层往里走）：
+// response.choices[0].message.content
+//     ↑对象    ↑数组[0]  ↑对象    ↑字段
+```
+
+**Python 中操作 JSON：**
+```python
+import json
+
+# API 返回的已经是 Python 对象了（SDK 自动解析了）
+response = client.chat(...)  # ← 这是对象，不是字符串
+reply = response.choices[0].message.content  # 直接点号访问
+
+# 如果你自己收到 JSON 字符串：
+text = '{"name": "张三"}'  # 字符串
+parsed = json.loads(text)   # 转成 Python 字典
+print(parsed["name"])       # 输出：张三
+
+back_to_text = json.dumps(parsed)  # 字典转回字符串
+```
+
+**为什么响应验证器要对 JSON 字段做检查？**
+- 如果 API 某天改了字段名（比如 `completion_tokens` 改成 `output_tokens`），你的访问代码就会报错
+- 如果 API 某天改了字段类型（比如 `created` 从数字变成了字符串），同样会报错
+- 定期验证 JSON 结构 = 提前发现 API 变更
+
+---
+
+### 2.5 Unix 时间戳——API 时间的"通用语言"
+
+**一句话定义：** Unix 时间戳是从 1970 年 1 月 1 日 00:00:00 UTC 到现在的总秒数。API 用它表示时间而不是用"2026-04-30 09:24:00"。
+
+**类比：**
+```
+普通日期（人类友好，机器不友好）：
+  "2026年4月30日上午9点24分"
+  → 不同时区的人看到的时间含义不同
+  → 字符串比较不方便（"2月"
 
 ### 3.1 模块架构图
 

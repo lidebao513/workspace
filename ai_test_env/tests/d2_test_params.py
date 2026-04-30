@@ -26,8 +26,8 @@ from pathlib import Path
 # 将项目根目录加入 Python 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.api_client import AITestClient
 from dotenv import load_dotenv
+from utils.d1_api_client import AITestClient
 
 
 def test_max_tokens_boundary(client):

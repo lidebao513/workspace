@@ -28,8 +28,8 @@ from pathlib import Path
 # 将项目根目录加入 Python 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.api_client import AITestClient
-from utils.error_classifier import ErrorClassifier, ErrorCategory
+from utils.d1_api_client import AITestClient
+from utils.d3_error_classifier import ErrorClassifier, ErrorCategory
 from dotenv import load_dotenv
 
 

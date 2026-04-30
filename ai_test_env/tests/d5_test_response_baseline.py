@@ -29,8 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.api_client import AITestClient
-from utils.response_validator import ResponseValidator
+from utils.d1_api_client import AITestClient
+from utils.d4_response_validator import ResponseValidator
 from dotenv import load_dotenv
 
 
