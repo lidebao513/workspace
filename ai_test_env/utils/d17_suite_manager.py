@@ -35,6 +35,7 @@ class TestLevel(Enum):
     PERFORMANCE = "performance"  # 性能 — 并发+响应时间
     E2E = "e2e"                  # 端到端 — 业务场景
     ALL = "all"                  # 全部
+    __test__ = False  # 防止 pytest 误收集
 
 
 class TagCategory(Enum):
@@ -47,6 +48,7 @@ class TagCategory(Enum):
     PERFORMANCE = "performance"
     BOUNDARY = "boundary"
     ERROR = "error"
+    __test__ = False  # 防止 pytest 误收集
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +58,7 @@ class TagCategory(Enum):
 @dataclass
 class TestCaseMeta:
     """测试用例元信息"""
+    __test__ = False  # 防止 pytest 误收集
     name: str
     level: TestLevel
     tags: List[TagCategory]
@@ -91,6 +94,7 @@ class TestSuiteManager:
     - 生成测试覆盖报告
     - 导出用例清单
     """
+    __test__ = False  # 防止 pytest 误收集
 
     def __init__(self):
         self._cases: Dict[str, TestCaseMeta] = {}

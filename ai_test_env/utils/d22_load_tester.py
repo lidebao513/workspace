@@ -106,7 +106,7 @@ class LoadTester:
             except Exception:
                 pass
 
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         def _worker():
             nonlocal success_count, fail_count
@@ -128,7 +128,7 @@ class LoadTester:
             for f in as_completed(futures):
                 f.result()  # 确保异常被捕获
 
-        end_time = time.time()
+        end_time = time.perf_counter()
         total_time = end_time - start_time
 
         if not latencies:
