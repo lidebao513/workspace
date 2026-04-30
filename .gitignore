@@ -1,0 +1,14 @@
+# 忽略所有文件
+*
+
+# 但允许 ai_test_env 目录
+!ai_test_env/
+!ai_test_env/**
+
+# 允许 ai_test_engine 目录（如果将来创建）
+!ai_test_engine/
+!ai_test_engine/**
+
+# 允许必要的配置文件
+!.gitignore
+!README.md
