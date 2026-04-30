@@ -54,6 +54,7 @@ class ExpectedToolCall:
 
 @dataclass
 class TestCase:
+    __test__ = False  # 防止 pytest 误收集为测试类
     """工具调用测试用例"""
     name: str
     prompt: str

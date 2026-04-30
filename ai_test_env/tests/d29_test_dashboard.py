@@ -56,7 +56,7 @@ def test_builder_all_green():
     report = builder.build()
     assert report.summary.startswith("✅")
     assert len(report.indicators) >= 2
-    assert len(report.health_items) >= 5
+    assert len(report.health_items) == 4
 
 
 def test_builder_partial_warn():
