@@ -171,3 +171,9 @@ def test_level_stats():
         assert report.total_runs == 3
         assert report.level_stats.get("smoke", 0) == 2
         assert report.level_stats.get("full", 0) == 1
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

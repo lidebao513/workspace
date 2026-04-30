@@ -105,3 +105,9 @@ def test_run_load_test_plan():
     assert len(result["profiles"]) == 3
     assert "note" in result
     assert "estimated_time_s" in result
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

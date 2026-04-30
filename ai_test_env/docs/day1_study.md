@@ -276,6 +276,269 @@ ai_test_env/                    ← 项目根目录
 
 ---
 
+## 📌 新增内容：虚拟环境使用指南
+
+> 以下内容为补充内容，帮助新手解决环境配置问题。
+
+### 3.1 为什么要用虚拟环境？
+
+**一句话解释：** 虚拟环境就像给每个项目分配一个独立的"房间"，里面有自己的依赖版本，不会和其他项目打架。
+
+| 场景 | 不用虚拟环境 | 用虚拟环境 |
+|:----|:------------|:----------|
+| 项目A需要openai=1.0 | 装在全局 | 项目A的房间里装1.0 |
+| 项目B需要openai=2.0 | 冲突！只能二选一 | 项目B的房间里装2.0 |
+| 同事接手项目 | "我这边跑不起来" | 跑 `pip install -r requirements.txt` 搞定 |
+
+### 3.2 创建和激活虚拟环境
+
+```bash
+# 1. 创建虚拟环境（在你项目目录下）
+python -m venv venv
+
+# 2. Windows PowerShell 激活
+.\venv\Scripts\Activate.ps1
+
+# 3. 激活成功后，命令行会显示 (venv) 前缀
+(venv) PS C:\Users\xxx\ai_test_env>
+```
+
+**常见问题：**
+- 如果 PowerShell 报错"禁止运行脚本"，需要先执行：
+  ```powershell
+  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+  ```
+
+### 3.3 安装项目依赖
+
+```bash
+# 确保已激活虚拟环境（看到 (venv) 前缀）
+
+# 一键安装所有依赖
+pip install -r requirements.txt
+
+# 验证安装成功
+pip list | grep openai
+```
+
+### 3.4 退出虚拟环境
+
+```bash
+# 退出虚拟环境（回到系统 Python）
+deactivate
+```
+
+### 3.5 requirements.txt 文件内容
+
+```txt
+# 核心依赖 - 必装
+openai>=1.13.0              # OpenAI SDK，支持 DeepSeek 等兼容 API
+python-dotenv>=1.0.0        # 支持从 .env 文件读取环境变量
+
+# 测试框架 - Day 2 及以后会用到
+pytest>=7.4.0               # Python 单元测试框架
+pytest-html>=4.0.0           # 生成 HTML 测试报告
+```
+
+### 3.6 .gitignore 配置详解
+
+```gitignore
+# ========== Python 相关 ==========
+# Python 字节码缓存（自动生成，不需要上传）
+__pycache__/
+*.py[cod]        # *.pyc, *.pyo, *.pyd
+*$py.class       # Windows 编译的 Python 类
+
+# 虚拟环境（每个人的环境不同，不需要同步）
+venv/
+env/
+.venv/
+
+# ========== 敏感信息 ==========
+# 环境变量文件（包含 API Key！）
+.env
+.env.local
+.env.*.local
+
+# ========== IDE 配置 ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ========== 日志和临时文件 ==========
+*.log
+*.tmp
+.DS_Store      # macOS 系统文件
+Thumbs.db       # Windows 系统文件
+
+# ========== 测试相关 ==========
+htmlcov/
+.coverage
+.pytest_cache/
+```
+
+**为什么忽略这些？**
+- `venv/`：虚拟环境，每个人的 Python 版本和依赖版本可能不同
+- `.env`：包含 API Key 等敏感信息，绝对不能上传
+- `__pycache__/`：Python 运行时自动生成的缓存，没必要上传
+
+---
+
+### 📌 新增内容：环境变量优先级与配置管理
+
+### 3.7 环境变量优先级
+
+当存在多个配置来源时，Python 按以下优先级（从高到低）读取：
+
+```python
+# 优先级从高到低：
+# 1. 操作系统环境变量（export LINUX_VAR=value）
+# 2. .env 文件中的变量
+# 3. 代码中的默认值
+
+# 示例：假设 .env 中写的是 deepseek-chat
+# 但系统环境变量 MODEL_NAME=deepseek-reasoner
+# 那么实际使用的是 deepseek-reasoner
+
+self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+#                         ↑ 系统环境变量优先于默认值
+```
+
+### 3.8 python-dotenv 高级用法
+
+**多环境配置：**
+```bash
+# .env.development - 开发环境
+DEEPSEEK_API_KEY=sk-dev-xxxxx
+API_BASE=https://api.deepseek.com
+DEBUG=true
+
+# .env.production - 生产环境
+DEEPSEEK_API_KEY=sk-prod-xxxxx
+API_BASE=https://api.deepseek.com
+DEBUG=false
+```
+
+```python
+# 加载指定环境的配置
+from dotenv import load_dotenv
+
+# 开发环境
+load_dotenv(".env.development")
+
+# 生产环境
+load_dotenv(".env.production")
+```
+
+**变量引用：**
+```bash
+# .env 支持变量引用
+PROJECT_NAME=ai_test_env
+LOG_DIR=${PROJECT_NAME}/logs
+CONFIG_PATH=${PROJECT_NAME}/config
+```
+
+---
+
+### 📌 新增内容：测试结果保存与问题排查
+
+### 3.9 保存 Token 基线数据
+
+```python
+import json
+import datetime
+
+def save_token_baseline(usage, filename="token_baseline.json"):
+    """保存 Token 基线数据，用于后续对比"""
+    baseline = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "model": "deepseek-chat",
+        "usage": usage,
+        "cost_cny": (
+            usage['prompt_tokens'] * 1 +
+            usage['completion_tokens'] * 2
+        ) / 1_000_000  # DeepSeek 定价
+    }
+
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(baseline, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ 基线已保存: {baseline['cost_cny']:.6f} CNY")
+
+# 使用示例
+usage = client.get_token_usage(response)
+save_token_baseline(usage)
+```
+
+### 3.10 与基线对比检测异常
+
+```python
+def compare_with_baseline(current_usage, baseline_file="token_baseline.json"):
+    """对比当前消耗与基线，检测异常"""
+    import os
+    if not os.path.exists(baseline_file):
+        print("⚠️  基线文件不存在，跳过对比")
+        return
+
+    with open(baseline_file, "r", encoding="utf-8") as f:
+        baseline = json.load(f)
+
+    current_total = current_usage['total_tokens']
+    baseline_total = baseline['usage']['total_tokens']
+
+    # 计算偏差比例
+    deviation = (current_total - baseline_total) / baseline_total
+
+    print(f"\n📊 Token 消耗对比：")
+    print(f"   基线: {baseline_total} tokens")
+    print(f"   当前: {current_total} tokens")
+    print(f"   偏差: {deviation:+.1%}")
+
+    # 偏差超过 50% 则告警
+    if abs(deviation) > 0.5:
+        print(f"⚠️  Token 消耗异常！请检查是否模型版本变更或输入变长")
+    else:
+        print(f"✅ Token 消耗正常")
+
+# 运行对比
+usage = client.get_token_usage(response)
+compare_with_baseline(usage)
+```
+
+---
+
+### 3.11 常见问题排查指南
+
+| 错误现象 | 可能原因 | 排查步骤 |
+|:--------|:--------|:---------|
+| `ModuleNotFoundError: No module named 'openai'` | 没装依赖或没激活虚拟环境 | 1. 检查命令行是否有 `(venv)` 前缀<br>2. 运行 `pip install openai`<br>3. 检查是否在正确的目录下 |
+| `ValueError: DEEPSEEK_API_KEY 未配置` | .env 文件没配置或路径不对 | 1. 确认 `.env` 文件存在于项目根目录<br>2. 检查 KEY 是否正确复制（不要有空格）<br>3. 确认文件名是 `.env` 而不是 `.env.txt` |
+| `RateLimitError: Rate limit reached` | API 调用频率超限 | 1. 等待 1 分钟再试<br>2. 检查是否有多余的程序在调用 API<br>3. 登录 DeepSeek 平台查看用量 |
+| `APIConnectionError` | 网络问题或 Base URL 错误 | 1. 检查网络连接<br>2. 确认 Base URL 是 `https://api.deepseek.com`<br>3. 尝试访问 API 地址是否正常 |
+| `AuthenticationError: Incorrect API key` | API Key 无效或过期 | 1. 检查 Key 是否正确复制<br>2. 登录 DeepSeek 平台确认 Key 状态<br>3. 确认 Key 没有被删除或禁用 |
+| 程序卡住没有响应 | 请求超时 | 1. 检查网络是否稳定<br>2. 增加 timeout 参数的值<br>3. 按 Ctrl+C 中断，查看错误信息 |
+
+**快速诊断命令：**
+```bash
+# 检查 Python 版本（需要 3.8+）
+python --version
+
+# 检查虚拟环境是否激活
+which python  # Windows 用 where python
+
+# 检查已安装的包
+pip list | grep -E "openai|dotenv"
+
+# 测试 API 连通性
+curl https://api.deepseek.com
+```
+
+---
+
+---
+
 ## 四、代码逐行讲解
 
 ### 4.1 `.env` 文件

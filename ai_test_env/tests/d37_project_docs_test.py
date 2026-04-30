@@ -4,6 +4,8 @@ D37-D38 — 项目文档验证测试
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+_docs_dir = os.path.join(os.path.dirname(__file__), "..", "docs")
+
 
 def test_readme_exists():
     path = os.path.join(os.path.dirname(__file__), "..", "README.md")
@@ -28,14 +30,14 @@ def test_readme_has_quick_start():
 
 
 def test_architecture_exists():
-    path = os.path.join(os.path.dirname(__file__), "..", "ARCHITECTURE.md")
+    path = os.path.join(_docs_dir, "ARCHITECTURE.md")
     assert os.path.exists(path), "ARCHITECTURE.md 不存在"
     size = os.path.getsize(path)
     assert size > 3000, f"ARCHITECTURE 太小: {size} 字节"
 
 
 def test_architecture_has_layers():
-    path = os.path.join(os.path.dirname(__file__), "..", "ARCHITECTURE.md")
+    path = os.path.join(_docs_dir, "ARCHITECTURE.md")
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     assert "工具层" in content or "Tool" in content
@@ -43,7 +45,7 @@ def test_architecture_has_layers():
 
 
 def test_architecture_has_dep_graph():
-    path = os.path.join(os.path.dirname(__file__), "..", "ARCHITECTURE.md")
+    path = os.path.join(_docs_dir, "ARCHITECTURE.md")
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     assert "依赖" in content or "d27" in content
@@ -52,3 +54,9 @@ def test_architecture_has_dep_graph():
 def test_plan_v3_exists():
     path = os.path.join(os.path.dirname(__file__), "..", "ai_test_learning_plan_v3.md")
     assert os.path.exists(path), "学习计划不存在"
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

@@ -234,3 +234,9 @@ def test_case_short_display():
     display = c.short_display()
     assert "TL-001" in display
     assert "time_awareness" in display
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

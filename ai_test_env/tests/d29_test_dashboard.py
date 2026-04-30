@@ -113,3 +113,9 @@ def test_dashboard_report_empty():
     report = builder.build()
     assert report.pass_rate == 1.0
     assert len(report.health_items) == 0
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

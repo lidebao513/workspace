@@ -105,6 +105,86 @@ temperature = 2.0  → 极度随机，可能胡言乱语（极端测试）
 
 ---
 
+### 📌 新增内容：top_p 参数——另一种控制随机性的方式
+
+> 以下内容为补充内容，帮助理解另一个重要的采样参数。
+
+### 2.4.1 什么是 top_p？
+
+**一句话定义：** top_p 是"核采样"（Nucleus Sampling）的参数，控制模型只从概率累加达到 top_p 的词中选择。
+
+**打个比方：**
+```
+模型预测下一个词的概率分布：
+  "好"   → 50%
+  "不错" → 25%
+  "很棒" → 15%
+  "一般" → 5%
+  "很差" → 3%
+  其他   → 2%
+
+如果 top_p = 0.9：
+  50% + 25% + 15% = 90% ≥ 0.9 ✓
+  → 只从 ["好", "不错", "很棒"] 中选（概率累加到 90% 的词）
+
+如果 top_p = 0.5：
+  50% < 0.5，需要继续加
+  50% + 25% = 75% ≥ 0.5 ✓
+  → 只从 ["好", "不错"] 中选（更确定）
+```
+
+### 2.4.2 top_p 和 temperature 的对比
+
+| 参数 | 作用机制 | 控制方式 | 同时使用 |
+|:----|:---------|:--------|:---------|
+| temperature | 缩放所有概率，让高分词更突出 | 软控制 | 可以同时设 |
+| top_p | 直接截断，只保留高概率词 | 硬截断 | 通常二选一 |
+
+**重要规则：** 一般情况下，temperature 和 top_p **不要同时使用**，通常是二选一：
+- 用 temperature → 不设置 top_p（或 top_p=1）
+- 用 top_p → 不设置 temperature（或 temperature=1）
+
+### 2.4.3 top_p 的等价类划分
+
+```
+top_p = 0.1   → 极度确定，只选最高概率的词
+top_p = 0.5   → 中等确定，概率累加到 50% 的词
+top_p = 0.9   → 较多样，与 temperature=0.7 效果类似
+top_p = 0.95  → 几乎不截断，保留 95% 的词
+top_p = 1.0   → 完全不截断，所有词都可选
+```
+
+**面试话术：**
+> "top_p 和 temperature 都能控制随机性，但机制不同。temperature 是'软'控制，缩放所有概率；top_p 是'硬'截断，直接丢弃低概率词。实际测试中发现，top_p=0.9 配合 temperature=0.7 比单独用高 temperature 效果更稳定。"
+
+### 2.4.4 测试 top_p 参数
+
+```python
+def test_top_p_comparison(client):
+    """测试不同 top_p 下回复的差异"""
+    messages = [{"role": "user", "content": "给我讲一个笑话"}]
+
+    top_ps = [
+        (0.1, "极度确定"),
+        (0.5, "中等确定"),
+        (0.9, "较多样"),
+        (1.0, "完全不截断"),
+    ]
+
+    for top_p, desc in top_ps:
+        response = client.chat_with_params(
+            messages,
+            temperature=0.7,  # 固定 temperature
+            top_p=top_p
+        )
+        reply = client.get_reply_text(response)
+        print(f"top_p={top_p} ({desc}): {reply[:50]}...")
+```
+
+---
+
+---
+
 ### 2.4 seed 参数原理——让"随机"变得"确定"
 
 **一句话定义：** seed 是一个"种子"数字，它决定了模型内部所有随机选择的起点，同一个 seed + 同一组参数 = 同一个结果。
@@ -386,6 +466,237 @@ print("  top_p: 0.9（默认值，暂不需要调整）")
 # 再用 Day 2 的边界测试跑一遍（确认参数行为一致）
 # 如果新模型在 temperature=0 下不再确定——这是一个 regression bug
 ```
+
+---
+
+### 📌 新增内容：参数组合测试矩阵
+
+> 以下内容为补充内容，帮助理解多参数组合测试的重要性。
+
+### 6.1 为什么需要参数组合测试？
+
+单独测试一个参数够了，但实际业务中**多个参数一起起作用**。参数之间可能存在交互影响。
+
+```python
+# 举例：temperature=1.5 + max_tokens=10 的组合
+# 可能是"截断的随机回复"——既随机又被截断，回复质量很差
+# 但如果分开测，你可能不会发现这个问题
+```
+
+### 6.2 推荐测试矩阵
+
+```python
+from itertools import product
+
+# 定义参数范围
+temps = [0.0, 0.7, 1.5]           # 低/中/高 temperature
+max_tokens_list = [100, 500]       # 短/长回复
+top_ps = [0.9, 0.95]              # 不同采样率
+
+# 生成所有组合
+test_matrix = [
+    # (temperature, max_tokens, top_p, 场景说明)
+    (0.0, 100, 0.9, "确定性短回复"),
+    (0.0, 500, 0.9, "确定性长回复"),
+    (0.7, 100, 0.9, "平衡短回复"),
+    (0.7, 500, 0.9, "平衡长回复"),
+    (1.5, 100, 0.9, "创意短回复"),
+    (1.5, 500, 0.9, "创意长回复"),
+]
+
+# 自动生成测试
+for temp, mt, top, desc in test_matrix:
+    response = client.chat_with_params(
+        messages,
+        temperature=temp,
+        max_tokens=mt,
+        top_p=top
+    )
+    reply = client.get_reply_text(response)
+    print(f"{desc}: {len(reply)} 字")
+```
+
+### 6.3 快速生成测试矩阵
+
+```python
+from itertools import product
+
+temps = [0.0, 0.7, 1.5]
+max_tokens_list = [100, 500]
+top_ps = [0.9, 0.95]
+
+# 生成所有组合
+combinations = list(product(temps, max_tokens_list, top_ps))
+print(f"共 {len(combinations)} 种组合需要测试")
+
+for temp, mt, top in combinations:
+    print(f"测试: temp={temp}, max_tokens={mt}, top_p={top}")
+```
+
+---
+
+### 📌 新增内容：pytest 参数化实现自动化测试
+
+> 以下内容为补充内容，展示如何用 pytest 实现自动化参数化测试。
+
+### 6.4 pytest 参数化方式
+
+```python
+import pytest
+
+class TestParamBoundary:
+    """参数边界测试 - pytest 版本"""
+
+    @pytest.mark.parametrize("max_tokens,expected_finish", [
+        (1, "length"),           # 极短，应被截断
+        (10, "length"),          # 短，应被截断
+        (100, "stop"),          # 中等，正常结束
+        (1024, "stop"),          # 长，正常结束
+    ])
+    def test_max_tokens_boundary(self, max_tokens, expected_finish):
+        """max_tokens 边界测试"""
+        response = client.chat_with_params(
+            [{"role": "user", "content": "解释什么是机器学习"}],
+            max_tokens=max_tokens
+        )
+        finish = response.choices[0].finish_reason
+
+        assert finish == expected_finish, \
+            f"max_tokens={max_tokens}, expected={expected_finish}, got={finish}"
+
+    @pytest.mark.parametrize("temperature,desc", [
+        (0.0, "完全确定"),
+        (0.3, "低随机性"),
+        (0.7, "默认值"),
+        (1.5, "高随机性"),
+        (2.0, "极限值"),
+    ])
+    def test_temperature_range(self, temperature, desc):
+        """temperature 范围测试"""
+        response = client.chat_with_params(
+            [{"role": "user", "content": "说一个水果"}],
+            temperature=temperature
+        )
+        reply = client.get_reply_text(response)
+        print(f"temperature={temperature} ({desc}): {reply[:30]}...")
+```
+
+### 6.5 pytest 运行命令
+
+```bash
+# 运行所有测试
+pytest tests/test_params.py -v
+
+# 只跑 max_tokens 相关
+pytest tests/test_params.py -k "max_tokens" -v
+
+# 只跑 temperature 相关
+pytest tests/test_params.py -k "temperature" -v
+
+# 生成 HTML 报告
+pytest tests/test_params.py --html=report.html --self-contained-html
+
+# 生成覆盖率报告
+pytest tests/test_params.py --cov=utils --cov-report=html
+```
+
+### 6.6 pytest fixtures 实现测试复用
+
+```python
+import pytest
+
+@pytest.fixture
+def api_client():
+    """创建并返回 API 客户端"""
+    client = AITestClient()
+    yield client
+    # 清理工作（如果需要）
+    print("测试完成")
+
+def test_something(api_client):
+    """使用 fixture"""
+    response = api_client.chat([{"role": "user", "content": "你好"}])
+    assert response.choices[0].message.content
+```
+
+---
+
+### 📌 新增内容：Token 消耗与参数的关系
+
+> 以下内容为补充内容，帮助理解参数如何影响 Token 消耗和费用。
+
+### 6.7 参数如何影响 Token 消耗
+
+```python
+def analyze_token_correlation():
+    """分析参数与 Token 消耗的关系"""
+
+    results = []
+    temps = [0.0, 0.5, 1.0, 1.5, 2.0]
+
+    for temp in temps:
+        response = client.chat_with_params(
+            [{"role": "user", "content": "给我讲一个有趣的故事"}],
+            temperature=temp,
+            max_tokens=500
+        )
+        usage = client.get_token_usage(response)
+        results.append({
+            "temperature": temp,
+            "completion_tokens": usage["completion_tokens"],
+            "total_tokens": usage["total_tokens"]
+        })
+        print(f"temperature={temp}: {usage['completion_tokens']} tokens")
+
+    # 分析趋势
+    print("\n结论：")
+    print("- temperature ↑ → completion_tokens ↑ (回复更长)")
+    print("- 但随机性 ↑ → 质量可能 ↓")
+    print("- 需要在费用和质量之间找平衡")
+```
+
+### 6.8 费用估算公式
+
+```python
+def estimate_cost(prompt_tokens, completion_tokens):
+    """估算一次请求的费用（DeepSeek 参考价）"""
+    input_cost = prompt_tokens * 0.14 / 1_000_000  # 0.14 元/百万 tokens
+    output_cost = completion_tokens * 0.28 / 1_000_000  # 0.28 元/百万 tokens
+    return input_cost + output_cost
+
+def estimate_monthly_cost(daily_requests, avg_tokens):
+    """估算月费用"""
+    daily_cost = estimate_cost(avg_tokens * 0.3, avg_tokens * 0.7) * daily_requests
+    monthly_cost = daily_cost * 30
+    return monthly_cost
+
+# 示例计算
+cost_per_request = estimate_cost(50, 100)
+print(f"单次请求费用: {cost_per_request:.6f} 元")
+
+# 月费用估算：每天 1000 次，每次平均 500 tokens
+monthly = estimate_monthly_cost(1000, 500)
+print(f"月费用估算: {monthly:.2f} 元")
+```
+
+### 6.9 费用控制策略
+
+```python
+def optimize_cost():
+    """费用优化策略"""
+
+    strategies = [
+        ("减少 max_tokens", "只设置必要的最大长度，避免浪费"),
+        ("使用缓存", "相同 prompt 走缓存，省 90%"),
+        ("批量请求", "Batch API 省 50%，但有 24h 延迟"),
+        ("模型选择", "简单任务用小模型，省 70%"),
+    ]
+
+    for name, desc in strategies:
+        print(f"• {name}: {desc}")
+```
+
+---
 
 ---
 
@@ -722,3 +1033,190 @@ python tests/test_params.py
 ---
 
 > 跑通后告诉我结果。如果准备好了 Day 3（请求格式 + 错误分类处理和决策树），随时说。
+
+---
+
+### 📌 新增内容：API 异常参数处理行为表
+
+> 以下内容为补充内容，帮助理解 API 对异常参数的处理方式。
+
+### 10.1 异常参数处理行为
+
+| 参数 | 异常值 | API 实际行为 | 建议处理 |
+|:----|:------|:------------|:---------|
+| temperature | < 0 | 自动修正为 0 | 记录警告，继续执行 |
+| temperature | > 2.0 | 自动修正为 2 或报错 | 确认行为，设置上限 |
+| temperature | 非数字 | 报错 400 | 前端校验，禁止提交 |
+| temperature | None | 使用默认值 | 容错处理 |
+| max_tokens | 0 | 报错或返回空 | 禁止提交 |
+| max_tokens | < 0 | 报错 | 前端校验，禁止提交 |
+| max_tokens | 极大值(如99999999) | 可能触发限流或被截断 | 设置合理上限 |
+| top_p | < 0 | 自动修正为 0 | 记录警告 |
+| top_p | > 1 | 自动修正为 1 或报错 | 确认行为 |
+| top_p | None | 使用默认值 | 容错处理 |
+| seed | 非整数 | 报错或忽略 | 前端校验 |
+| seed | None | 不固定随机 | 正常处理 |
+| model | 不存在的模型名 | 报错 404 | 前端下拉框限制 |
+| messages | 空列表 [] | 报错 400 | 前端校验 |
+| messages | 缺少 content | 报错 400 | 前端校验 |
+
+### 10.2 测试异常参数的建议代码
+
+```python
+def test_parameter_edge_cases(client):
+    """测试参数的边界和异常情况"""
+    messages = [{"role": "user", "content": "你好"}]
+
+    test_cases = [
+        # (参数名, 参数值, 期望行为)
+        ("temperature=-0.1", {"temperature": -0.1}, "自动修正"),
+        ("temperature=2.1", {"temperature": 2.1}, "自动修正"),
+        ("temperature=abc", {"temperature": "abc"}, "报错或修正"),
+        ("max_tokens=0", {"max_tokens": 0}, "报错或空回复"),
+        ("max_tokens=-1", {"max_tokens": -1}, "报错"),
+        ("top_p=-0.1", {"top_p": -0.1}, "自动修正"),
+        ("top_p=1.1", {"top_p": 1.1}, "自动修正"),
+    ]
+
+    for name, params, expected in test_cases:
+        try:
+            response = client.chat_with_params(messages, **params)
+            print(f"✅ {name}: {expected} (response OK)")
+        except Exception as e:
+            print(f"⚠️  {name}: 报错 - {type(e).__name__}")
+```
+
+---
+
+### 📌 新增内容：参数基线的回归测试
+
+> 以下内容为补充内容，帮助建立参数基线并进行回归测试。
+
+### 10.3 保存参数基线
+
+```python
+import json
+from datetime import datetime
+
+def save_param_baseline(results, filename="param_baseline.json"):
+    """保存参数测试基线，用于后续回归对比"""
+
+    baseline = {
+        "date": datetime.now().isoformat(),
+        "model": "deepseek-chat",
+        "results": results
+    }
+
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(baseline, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ 参数基线已保存: {filename}")
+
+# 使用示例：测试后保存结果
+results = [
+    {"param": "temperature=0", "avg_tokens": 85.3, "avg_length": 42, "consistency": "98%"},
+    {"param": "temperature=0.7", "avg_tokens": 120.5, "avg_length": 60, "consistency": "75%"},
+    {"param": "temperature=1.5", "avg_tokens": 150.2, "avg_length": 75, "consistency": "45%"},
+    {"param": "max_tokens=1", "finish_reason": "length", "avg_tokens": 1},
+    {"param": "max_tokens=10", "finish_reason": "length", "avg_tokens": 10},
+    {"param": "max_tokens=100", "finish_reason": "stop", "avg_tokens": 85},
+]
+
+save_param_baseline(results)
+```
+
+### 10.4 对比回归检测
+
+```python
+def compare_param_baseline(current_results, baseline_file="param_baseline.json"):
+    """与基线对比，检测参数回归"""
+
+    import os
+    if not os.path.exists(baseline_file):
+        print("⚠️  基线文件不存在，请先运行基线测试")
+        return
+
+    with open(baseline_file, "r", encoding="utf-8") as f:
+        baseline = json.load(f)
+
+    print(f"\n📊 参数回归检测（对比基线: {baseline['date']}）")
+    print("=" * 50)
+
+    anomalies = []
+
+    for current in current_results:
+        for base in baseline["results"]:
+            if current["param"] == base["param"]:
+
+                # 检测 Token 消耗偏差
+                if "avg_tokens" in current and "avg_tokens" in base:
+                    deviation = abs(current["avg_tokens"] - base["avg_tokens"]) / max(base["avg_tokens"], 1)
+                    if deviation > 0.2:  # 偏差超过 20%
+                        anomalies.append({
+                            "param": current["param"],
+                            "issue": "Token消耗异常",
+                            "baseline": base["avg_tokens"],
+                            "current": current["avg_tokens"],
+                            "deviation": f"{deviation:.1%}"
+                        })
+
+                # 检测 finish_reason 变化
+                if "finish_reason" in current and "finish_reason" in base:
+                    if current["finish_reason"] != base["finish_reason"]:
+                        anomalies.append({
+                            "param": current["param"],
+                            "issue": "finish_reason变化",
+                            "baseline": base["finish_reason"],
+                            "current": current["finish_reason"],
+                        })
+
+    if anomalies:
+        print("⚠️  发现异常：")
+        for a in anomalies:
+            print(f"  • {a['param']}: {a['issue']}")
+            print(f"    基线: {a.get('baseline')}, 当前: {a.get('current')}")
+            if 'deviation' in a:
+                print(f"    偏差: {a['deviation']}")
+    else:
+        print("✅ 所有参数表现正常，无回归")
+
+    return anomalies
+
+# 使用
+current_results = [
+    {"param": "temperature=0", "avg_tokens": 88.1},  # 比基线略高
+    {"param": "temperature=0.7", "avg_tokens": 118.2},  # 比基线略低
+]
+compare_param_baseline(current_results)
+```
+
+### 10.5 自动生成基线报告
+
+```python
+def generate_param_report():
+    """生成参数测试报告"""
+
+    report = []
+    report.append("# 参数边界测试报告")
+    report.append(f"\n生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append(f"\n模型: deepseek-chat")
+    report.append("\n## 测试结果摘要")
+    report.append("\n### temperature 影响")
+    report.append("| temperature | 随机性 | 适用场景 |")
+    report.append("|:------------|:-------|:---------|")
+    report.append("| 0.0 | 完全确定 | 金融、法律 |")
+    report.append("| 0.3 | 低随机性 | 客服、保险 |")
+    report.append("| 0.7 | 适中 | 通用场景 |")
+    report.append("| 1.5 | 高随机性 | 创意场景 |")
+    report.append("| 2.0 | 极限值 | 测试用 |")
+
+    report_content = "\n".join(report)
+
+    with open("param_test_report.md", "w", encoding="utf-8") as f:
+        f.write(report_content)
+
+    print("✅ 报告已生成: param_test_report.md")
+    return report_content
+```
+
+```

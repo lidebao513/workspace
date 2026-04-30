@@ -185,3 +185,9 @@ def test_run_level_values():
     assert RunLevel.SECURITY.value == "security"
     assert RunLevel.E2E.value == "e2e"
     assert RunLevel.FULL.value == "full"
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

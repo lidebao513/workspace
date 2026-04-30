@@ -111,3 +111,9 @@ def test_main_returns_1_without_key():
     finally:
         if old_key:
             os.environ["DEEPSEEK_API_KEY"] = old_key
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

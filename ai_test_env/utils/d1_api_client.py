@@ -16,11 +16,11 @@
 面试话术参考：
     "我搭过完整的 AI 测试环境，环境变量分离、降级策略都是标配。"
 """
-import os
 import json
-from typing import Optional, List, Dict
+import os
+from typing import Dict, List, Optional
 
-from openai import OpenAI, APIError, APIConnectionError, RateLimitError
+from openai import APIConnectionError, APIError, OpenAI, RateLimitError
 
 
 class AITestClient:

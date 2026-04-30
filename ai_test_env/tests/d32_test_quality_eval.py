@@ -94,3 +94,9 @@ def test_evaluate_schema_code():
     """代码回复进行 schema 检查"""
     result = evaluate_with_schema('{"content": "code", "code": "def foo()"}', "code_generation")
     assert result["checked"]
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+

@@ -35,3 +35,9 @@ def test_check_imports_returns_keys_are_strings():
         assert isinstance(k, str)
         assert "ok" in v
         assert "msg" in v
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v", "--tb=short"])
+
