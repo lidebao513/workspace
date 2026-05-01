@@ -89,13 +89,132 @@ A: 冒烟的核心是"快速反馈"。我的标准是：如果冒烟不过，其
 **Q: 如何处理 API Key 对冒烟测试的限制？**
 A: 所有冒烟测试都是无 API 调用、纯逻辑测试。连通性测试不调真实 API，只验证参数构造是否正确。这是刻意设计的——让测试可以离线跑。
 
-## 八、产出物
+**Q: 为什么边界值分析在 AI API 测试中特别重要？**
+A: AI API 对参数非常敏感，比如 temperature 超过 2.0 或小于 0 会导致不可预测的行为，max_tokens 设为负数会直接报错。80% 的参数相关 bug 都发生在边界，所以必须重点覆盖。
+
+**Q: 如何设计消息格式测试用例？**
+A: 我会覆盖以下场景：有效角色（user/system/assistant）、无效角色（uaser、admin）、空内容、超长内容、多轮对话结构、混合格式（文本+工具调用）。特别要注意角色拼写错误，这是最容易被忽略的 bug。
+
+## 八、代码示例
+
+### 边界值测试用例实现
+
+```python
+import pytest
+
+class TestMaxTokensBoundary:
+    """测试 max_tokens 参数边界"""
+    
+    def test_max_tokens_zero(self):
+        """测试 max_tokens=0 的边界情况"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        # max_tokens=0 应该被拒绝或返回空响应
+        with pytest.raises(ValueError):
+            client._validate_params({"max_tokens": 0})
+    
+    def test_max_tokens_min(self):
+        """测试 max_tokens=1 的最小有效值"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        params = client._validate_params({"max_tokens": 1})
+        assert params["max_tokens"] == 1
+    
+    def test_max_tokens_max(self):
+        """测试 max_tokens=4096 的最大有效值"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        params = client._validate_params({"max_tokens": 4096})
+        assert params["max_tokens"] == 4096
+    
+    def test_max_tokens_negative(self):
+        """测试 max_tokens=-1 的无效值"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        with pytest.raises(ValueError):
+            client._validate_params({"max_tokens": -1})
+
+class TestTemperatureBoundary:
+    """测试 temperature 参数边界"""
+    
+    def test_temperature_boundaries(self):
+        """测试 temperature 的各种边界值"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        
+        # 有效值应该通过
+        assert client._validate_params({"temperature": 0.0})["temperature"] == 0.0
+        assert client._validate_params({"temperature": 0.5})["temperature"] == 0.5
+        assert client._validate_params({"temperature": 1.0})["temperature"] == 1.0
+        assert client._validate_params({"temperature": 2.0})["temperature"] == 2.0
+        
+        # 无效值应该被拒绝
+        with pytest.raises(ValueError):
+            client._validate_params({"temperature": -0.5})
+
+class TestMessageFormat:
+    """测试消息格式验证"""
+    
+    def test_valid_roles(self):
+        """测试有效角色"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        valid_messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "assistant", "content": "Hi there!"}
+        ]
+        assert client._validate_messages(valid_messages) is None
+    
+    def test_invalid_role(self):
+        """测试无效角色"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        invalid_messages = [
+            {"role": "uaser", "content": "Hello"}  # 拼写错误
+        ]
+        with pytest.raises(ValueError):
+            client._validate_messages(invalid_messages)
+    
+    def test_empty_content(self):
+        """测试空内容"""
+        from ai_test_engine.core.client import AIEngineClient
+        
+        client = AIEngineClient()
+        empty_messages = [
+            {"role": "user", "content": ""}
+        ]
+        with pytest.raises(ValueError):
+            client._validate_messages(empty_messages)
+```
+
+## 九、产出物
 
 - `tests/smoke/test_boundary.py` — 20 个边界 + 格式测试
 - `tests/smoke/test_errors.py` — 16 个错误分类测试
 - `tests/smoke/test_connectivity.py` — 26 个核心可用性测试
 
-## 九、自检清单
+## 十、练习题
+
+1. **基础题：** 为 `top_p` 参数设计边界测试用例，覆盖 0、0.5、1.0、-0.1 这几个边界值。
+
+2. **进阶题：** 实现一个测试用例，验证多轮对话消息格式的正确性。消息应包含 user、assistant、user 三轮交替的角色。
+
+3. **挑战题：** 设计一个错误分类测试用例，覆盖以下场景：
+   - 400 Bad Request（无效参数）
+   - 401 Unauthorized（缺少 API Key）
+   - 403 Forbidden（Key 无效）
+   - 429 Too Many Requests（限流）
+   - 500 Internal Server Error（服务端错误）
+
+## 十一、自检清单
 
 - [ ] 覆盖 max_tokens 0/1/4096/-1
 - [ ] 覆盖 temperature 0/0.5/1.0/2.0/-0.5
@@ -103,7 +222,7 @@ A: 所有冒烟测试都是无 API 调用、纯逻辑测试。连通性测试不
 - [ ] 覆盖 4xx/5xx/网络/配置/校验五类错误
 - [ ] 消息格式：有效角色、无效角色、空内容、多轮
 
-## 十、运行验证
+## 十二、运行验证
 
 ```bash
 cd ai_test_engine

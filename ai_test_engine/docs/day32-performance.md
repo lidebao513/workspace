@@ -1,5 +1,12 @@
 # Day 32 — 性能测试模块
 
+## 学习目标
+
+1. 理解 P50/P90/P95/P99 百分位数的含义，学会计算和解读性能指标
+2. 掌握吞吐量计算方法，学会评估系统的处理能力
+3. 理解熔断器三态机制，学会实现服务保护
+4. 掌握 Token 计费模式，学会成本估算和异常检测
+
 ## 一、引言
 
 性能测试回答三个问题：能撑住多少并发？服务会不会被拖死？Token 烧了多少钱？
@@ -73,11 +80,227 @@ A: 主要看 API 恢复的平均时间。我的经验是设成 API P99 的 3 倍
 **Q: Token 审计里的异常检测怎么做的？**
 A: 环比——对比前一天的总 Token 消耗。增长超过 50% 标记为 SPIKE，下降超过 50% 标记为 DROP，连续 3 天增长标记为 STEADY_INCREASE。
 
-## 七、产出物
+**Q: P95/P99 为什么比平均延迟更重要？**
+A: 平均延迟会被极端值影响，不能反映真实用户体验。P99 告诉你最慢的 1% 请求有多慢，这部分用户可能会遇到严重的性能问题，是优化的重点。
+
+**Q: 熔断器和重试机制有什么区别？**
+A: 重试是微观层面的——针对单个失败请求进行重试；熔断器是宏观层面的——当服务持续失败时，主动停止所有请求，让服务有时间恢复。两者是互补的，不是互斥的。
+
+## 七、代码示例
+
+### 熔断器实现
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+import time
+from typing import Callable, Optional, Any
+
+class CircuitState(Enum):
+    """熔断器状态"""
+    CLOSED = "closed"      # 正常状态，允许请求
+    OPEN = "open"          # 熔断状态，拒绝请求
+    HALF_OPEN = "half_open"  # 半开状态，允许少量试探请求
+
+@dataclass
+class CircuitBreakerConfig:
+    """熔断器配置"""
+    failure_threshold: int = 5      # 失败阈值
+    recovery_timeout: float = 60.0  # 恢复超时时间（秒）
+    reset_timeout: float = 10.0     # 半开状态试探间隔（秒）
+
+class CircuitBreaker:
+    """熔断器实现"""
+    
+    def __init__(self, config: CircuitBreakerConfig = None):
+        self.config = config or CircuitBreakerConfig()
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0.0
+        self._last_attempt_time = 0.0
+    
+    @property
+    def state(self) -> CircuitState:
+        """获取当前状态"""
+        if self._state == CircuitState.OPEN:
+            # 检查是否可以进入半开状态
+            if time.time() - self._last_failure_time >= self.config.recovery_timeout:
+                self._state = CircuitState.HALF_OPEN
+        return self._state
+    
+    def _record_success(self):
+        """记录成功，重置失败计数"""
+        self._failure_count = 0
+        if self._state == CircuitState.HALF_OPEN:
+            self._state = CircuitState.CLOSED
+    
+    def _record_failure(self):
+        """记录失败，更新状态"""
+        self._failure_count += 1
+        self._last_failure_time = time.time()
+        
+        if self._failure_count >= self.config.failure_threshold:
+            self._state = CircuitState.OPEN
+    
+    def call(self, func: Callable, *args, fallback: Optional[Callable] = None, **kwargs) -> Any:
+        """执行函数，带熔断保护"""
+        current_state = self.state
+        
+        if current_state == CircuitState.OPEN:
+            if fallback:
+                return fallback()
+            raise Exception("Circuit breaker is open")
+        
+        # 半开状态下限制请求频率
+        if current_state == CircuitState.HALF_OPEN:
+            if time.time() - self._last_attempt_time < self.config.reset_timeout:
+                if fallback:
+                    return fallback()
+                raise Exception("Circuit breaker is in half-open state, too soon")
+            self._last_attempt_time = time.time()
+        
+        try:
+            result = func(*args, **kwargs)
+            self._record_success()
+            return result
+        except Exception as e:
+            self._record_failure()
+            raise e
+
+### Token 审计实现
+
+```python
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import List, Dict
+import os
+
+@dataclass
+class TokenRecord:
+    """Token 记录"""
+    timestamp: datetime
+    prompt_tokens: int
+    completion_tokens: int
+    model: str = "deepseek-chat"
+
+@dataclass
+class DailyReport:
+    """每日报告"""
+    date: str
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    call_count: int = 0
+    cost_usd: float = 0.0
+
+class TokenAuditor:
+    """Token 审计器"""
+    
+    # DeepSeek 价格（美元/1K Token）
+    PRICING = {
+        "prompt": 0.0005,
+        "completion": 0.0015
+    }
+    
+    def __init__(self):
+        self._records: List[TokenRecord] = []
+    
+    def record_call(self, prompt_tokens: int, completion_tokens: int, 
+                   model: str = "deepseek-chat") -> None:
+        """记录一次 API 调用"""
+        self._records.append(TokenRecord(
+            timestamp=datetime.now(),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            model=model
+        ))
+    
+    def calculate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
+        """计算单次调用成本"""
+        prompt_cost = (prompt_tokens / 1000) * self.PRICING["prompt"]
+        completion_cost = (completion_tokens / 1000) * self.PRICING["completion"]
+        return prompt_cost + completion_cost
+    
+    def daily_report(self, date: str = None) -> DailyReport:
+        """生成每日报告"""
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        
+        day_records = [r for r in self._records 
+                      if r.timestamp.strftime("%Y-%m-%d") == date]
+        
+        report = DailyReport(date=date)
+        for record in day_records:
+            report.total_prompt_tokens += record.prompt_tokens
+            report.total_completion_tokens += record.completion_tokens
+            report.call_count += 1
+            report.cost_usd += self.calculate_cost(
+                record.prompt_tokens, record.completion_tokens
+            )
+        
+        return report
+    
+    def total_cost(self) -> float:
+        """计算累积总费用"""
+        return sum(self.calculate_cost(r.prompt_tokens, r.completion_tokens) 
+                  for r in self._records)
+    
+    def detect_anomaly(self, baseline: DailyReport, current: DailyReport) -> str:
+        """检测 Token 消耗异常"""
+        if baseline.total_prompt_tokens == 0:
+            return "NO_BASELINE"
+        
+        prompt_ratio = current.total_prompt_tokens / baseline.total_prompt_tokens
+        completion_ratio = current.total_completion_tokens / baseline.total_completion_tokens
+        
+        if prompt_ratio > 1.5 or completion_ratio > 1.5:
+            return "SPIKE"
+        elif prompt_ratio < 0.5 or completion_ratio < 0.5:
+            return "DROP"
+        return "NORMAL"
+
+# 使用示例
+if __name__ == "__main__":
+    # 测试熔断器
+    breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=2, recovery_timeout=5))
+    
+    def unstable_service():
+        import random
+        if random.random() > 0.3:
+            raise Exception("Service unavailable")
+        return "Success"
+    
+    # 模拟多次失败
+    try:
+        for _ in range(3):
+            breaker.call(unstable_service)
+    except Exception as e:
+        print(f"熔断器触发: {e}")
+    
+    print(f"熔断器状态: {breaker.state}")
+    
+    # 测试 Token 审计
+    auditor = TokenAuditor()
+    auditor.record_call(100, 200)
+    auditor.record_call(150, 250)
+    
+    report = auditor.daily_report()
+    print(f"每日报告: {report}")
+    print(f"总费用: ${auditor.total_cost():.4f}")
+```
+
+## 八、产出物
 
 - `tests/performance/test_performance.py` — 17 个测试
 
-## 八、自检清单
+## 九、练习题
+
+1. **基础题：** 实现一个 `calculate_percentile()` 函数，接受耗时列表和百分位值（如 50、90、95、99），返回对应的百分位数值。
+
+2. **进阶题：** 为 `CircuitBreaker` 添加 `get_metrics()` 方法，返回熔断器的统计信息，包括总调用次数、成功次数、失败次数、状态切换次数。
+
+3. **挑战题：** 实现一个 `LoadTester` 类，支持并发压测，能够计算吞吐量、P50/P90/P95/P99 延迟，并生成压测报告。
+
+## 十、自检清单
 
 - [ ] LoadTester 能跑并发并计算吞吐量
 - [ ] percentile 计算正确（P50/P90/P99）

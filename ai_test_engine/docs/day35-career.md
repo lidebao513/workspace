@@ -1,5 +1,13 @@
 # Week 8 Day 35 — 薪资谈判 + 求职策略
 
+## 学习目标
+
+1. 了解上海 AI 测试工程师的薪资范围，学会评估自己的市场价值
+2. 掌握目标公司分类方法，学会制定求职策略
+3. 学会提炼简历亮点，将项目经验转化为竞争力
+4. 掌握薪资谈判技巧，学会争取合理薪酬
+5. 学会制定投递计划，提高求职效率
+
 > 基于 `shanghai_ai_test_jd_requirements.md` 的薪资参考数据。
 > 数据采集时间：26-04-28。实际薪资请按最新市场情况调整。
 
@@ -128,6 +136,186 @@
 3. "你们用什么模型？如何评估回复质量？"
 4. "有没有遇到过因为 AI 输出问题导致的生产事故？"
 5. "团队的技术栈是什么？测试覆盖率的目标是多少？"
+
+---
+
+## 代码示例
+
+### 薪资计算器与求职追踪工具
+
+```python
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import List, Dict, Optional
+
+@dataclass
+class SalaryRange:
+    """薪资范围"""
+    level: str
+    experience: str
+    min_salary: int  # K/月
+    max_salary: int  # K/月
+    
+    def calculate_expected(self, years: int, performance: float = 1.0) -> int:
+        """计算期望薪资"""
+        base = (self.min_salary + self.max_salary) // 2
+        return int(base * performance)
+
+@dataclass
+class JobApplication:
+    """求职申请记录"""
+    company: str
+    tier: str
+    position: str
+    status: str  # applied/interviewing/offered/rejected
+    salary_offer: Optional[int] = None  # K/月
+    notes: str = ""
+    timestamp: datetime = field(default_factory=datetime.now)
+
+class CareerManager:
+    """职业管理工具"""
+    
+    # 上海 AI 测试薪资基准
+    SHANGHAI_SALARY_RANGES = [
+        SalaryRange("初级", "1-3年", 12, 18),
+        SalaryRange("中级", "3-5年", 18, 28),
+        SalaryRange("高级", "5+年", 28, 40),
+        SalaryRange("架构/Leader", "8+年", 40, 55)
+    ]
+    
+    def __init__(self):
+        self.applications: List[JobApplication] = []
+    
+    def estimate_salary(self, experience_years: int, level: str = None) -> dict:
+        """估算薪资范围"""
+        # 根据经验确定级别
+        if level is None:
+            if experience_years < 3:
+                level = "初级"
+            elif experience_years < 5:
+                level = "中级"
+            elif experience_years < 8:
+                level = "高级"
+            else:
+                level = "架构/Leader"
+        
+        for sr in self.SHANGHAI_SALARY_RANGES:
+            if sr.level == level:
+                return {
+                    "level": sr.level,
+                    "experience": sr.experience,
+                    "min": sr.min_salary,
+                    "max": sr.max_salary,
+                    "expected": sr.calculate_expected(experience_years)
+                }
+        
+        return {}
+    
+    def add_application(self, company: str, tier: str, position: str) -> None:
+        """添加求职申请"""
+        self.applications.append(JobApplication(
+            company=company,
+            tier=tier,
+            position=position,
+            status="applied"
+        ))
+    
+    def update_status(self, company: str, status: str, 
+                     salary_offer: Optional[int] = None, notes: str = "") -> bool:
+        """更新申请状态"""
+        for app in self.applications:
+            if app.company == company:
+                app.status = status
+                app.salary_offer = salary_offer
+                app.notes = notes
+                return True
+        return False
+    
+    def get_status_report(self) -> dict:
+        """生成求职进度报告"""
+        status_counts = {}
+        total_applied = len(self.applications)
+        offers = [a for a in self.applications if a.status == "offered"]
+        avg_offer = sum(o.salary_offer for o in offers if o.salary_offer) / len(offers) if offers else 0
+        
+        for app in self.applications:
+            status_counts[app.status] = status_counts.get(app.status, 0) + 1
+        
+        return {
+            "total_applied": total_applied,
+            "status_counts": status_counts,
+            "offer_count": len(offers),
+            "avg_offer": round(avg_offer, 1) if avg_offer else 0,
+            "conversion_rate": round(len(offers) / total_applied * 100, 2) if total_applied else 0
+        }
+    
+    def generate_negotiation_script(self, current_offer: int, expected_min: int) -> str:
+        """生成薪资谈判脚本"""
+        if current_offer >= expected_min:
+            return f"当前 Offer {current_offer}K 已达到期望，可接受或小幅争取。"
+        
+        gap = expected_min - current_offer
+        percentage = round(gap / current_offer * 100, 1)
+        
+        return f"""薪资谈判脚本：
+
+当前 Offer: {current_offer}K
+期望薪资: {expected_min}K
+差距: {gap}K ({percentage}%)
+
+推荐话术：
+"感谢贵公司的 Offer。我对这个机会非常感兴趣，
+但考虑到我的经验和技能，我期望的薪资在 {expected_min}K 左右。
+不知道贵公司是否有调整的空间？"
+
+备选方案：
+如果对方无法满足薪资：
+"如果薪资方面确实有困难，能否考虑其他福利，
+比如更高的年终奖金、更多的年假或者期权？"
+"""
+
+# 使用示例
+if __name__ == "__main__":
+    manager = CareerManager()
+    
+    # 估算薪资
+    salary = manager.estimate_salary(5)
+    print("薪资估算:", salary)
+    
+    # 添加求职申请
+    manager.add_application("DeepSeek", "Tier 3", "AI测试工程师")
+    manager.add_application("蚂蚁集团", "Tier 2", "AI质量工程师")
+    manager.add_application("微软", "Tier 1", "Software Test Engineer")
+    
+    # 更新状态
+    manager.update_status("DeepSeek", "offered", 32, "base:32K, 14薪")
+    manager.update_status("蚂蚁集团", "interviewing", notes="二面完成")
+    
+    # 获取报告
+    report = manager.get_status_report()
+    print("\n求职进度报告:")
+    print(f"  总投递: {report['total_applied']}")
+    print(f"  各状态分布: {report['status_counts']}")
+    print(f"  Offer数量: {report['offer_count']}")
+    print(f"  平均Offer: {report['avg_offer']}K")
+    
+    # 生成谈判脚本
+    script = manager.generate_negotiation_script(32, 35)
+    print("\n" + script)
+```
+
+---
+
+## 练习题
+
+1. **基础题：** 使用 `CareerManager` 工具，添加 5 家目标公司的投递记录，并更新它们的状态。
+
+2. **进阶题：** 假设你有 3 年 AI 测试经验，使用薪资计算器估算你的期望薪资，并生成一份完整的薪资谈判脚本。
+
+3. **挑战题：** 扩展 `CareerManager` 类，添加以下功能：
+   - 支持记录面试时间和反馈
+   - 支持按公司 Tier 分组统计
+   - 添加投递阶段提醒（如超过 7 天无回复提醒跟进）
 
 ---
 

@@ -1,5 +1,12 @@
 # Week 8 Day 34 — 面试题刷练
 
+## 学习目标
+
+1. 掌握 STAR 面试回答框架，学会结构化地回答行为类问题
+2. 理解 AI 测试领域的核心面试问题，学会结合项目经验回答
+3. 学会将项目亮点转化为面试中的具体案例
+4. 掌握反问面试官的技巧，学会获取关键信息
+
 ## 高频面试题 10 道（STAR 格式 + 项目引用）
 
 ### 1. 请描述你测试 AI 模型/API 的经验
@@ -110,6 +117,154 @@
 - **ai_test_env**: ~600 测试用例，26 个模块，覆盖 8 周学习路径
 - **技术栈**: Python, OpenAI SDK, pytest, unittest, GitHub Actions
 - **覆盖维度**: 连通性 → 参数边界 → 错误处理 → 质量评估 → 安全注入 → 性能压测 → 熔断器 → Token 审计 → CI/CD
+
+---
+
+## 代码示例
+
+### 面试准备工具：问题练习框架
+
+```python
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional
+from datetime import datetime
+
+@dataclass
+class InterviewQuestion:
+    """面试问题模型"""
+    question: str
+    category: str  # 技术/行为/项目
+    difficulty: str  # 初级/中级/高级
+    star_answer: Dict[str, str] = field(default_factory=dict)
+    keywords: List[str] = field(default_factory=list)
+    practice_count: int = 0
+    last_practiced: Optional[datetime] = None
+
+@dataclass
+class PracticeSession:
+    """练习会话记录"""
+    question: str
+    duration: int  # 秒
+    score: int  # 1-5 分
+    feedback: str = ""
+    timestamp: datetime = field(default_factory=datetime.now)
+
+class InterviewPrepTool:
+    """面试准备工具"""
+    
+    def __init__(self):
+        self.questions: List[InterviewQuestion] = []
+        self.sessions: List[PracticeSession] = []
+    
+    def add_question(self, question: InterviewQuestion) -> None:
+        """添加面试问题"""
+        self.questions.append(question)
+    
+    def get_by_category(self, category: str) -> List[InterviewQuestion]:
+        """按类别筛选问题"""
+        return [q for q in self.questions if q.category == category]
+    
+    def get_by_difficulty(self, difficulty: str) -> List[InterviewQuestion]:
+        """按难度筛选问题"""
+        return [q for q in self.questions if q.difficulty == difficulty]
+    
+    def record_practice(self, question: str, duration: int, 
+                       score: int, feedback: str = "") -> None:
+        """记录练习会话"""
+        self.sessions.append(PracticeSession(
+            question=question,
+            duration=duration,
+            score=score,
+            feedback=feedback
+        ))
+        
+        # 更新问题练习次数
+        for q in self.questions:
+            if q.question == question:
+                q.practice_count += 1
+                q.last_practiced = datetime.now()
+                break
+    
+    def get_progress_report(self) -> dict:
+        """生成练习进度报告"""
+        if not self.sessions:
+            return {"total_practiced": 0, "avg_score": 0, "recommendations": []}
+        
+        avg_score = sum(s.score for s in self.sessions) / len(self.sessions)
+        total_practiced = len(self.sessions)
+        
+        # 找出需要加强的问题（练习次数少于3次或平均分低于4分）
+        needs_work = [q for q in self.questions 
+                     if q.practice_count < 3 or 
+                     (self._get_avg_score(q.question) < 4 and q.practice_count > 0)]
+        
+        return {
+            "total_practiced": total_practiced,
+            "avg_score": round(avg_score, 2),
+            "questions_count": len(self.questions),
+            "needs_work_count": len(needs_work),
+            "recommendations": [q.question for q in needs_work]
+        }
+    
+    def _get_avg_score(self, question: str) -> float:
+        """获取特定问题的平均分数"""
+        scores = [s.score for s in self.sessions if s.question == question]
+        if not scores:
+            return 0
+        return sum(scores) / len(scores)
+
+# 使用示例
+if __name__ == "__main__":
+    tool = InterviewPrepTool()
+    
+    # 添加问题
+    tool.add_question(InterviewQuestion(
+        question="请描述你测试 AI 模型/API 的经验",
+        category="项目",
+        difficulty="高级",
+        star_answer={
+            "S": "公司需要从 0 搭建 AI API 测试体系",
+            "T": "设计并实现完整的 AI 测试框架",
+            "A": "用 Python + OpenAI SDK 搭建了 ai_test_engine",
+            "R": "覆盖 6 个维度，161+ 测试用例"
+        },
+        keywords=["AI测试", "分层架构", "质量评估", "安全测试"]
+    ))
+    
+    tool.add_question(InterviewQuestion(
+        question="如何评估 LLM 回复质量？",
+        category="技术",
+        difficulty="中级",
+        star_answer={
+            "S": "需要替代人工评审的质量评估标准",
+            "T": "设计 5 维评分体系",
+            "A": "实现 QualityScore + LLMJudge + AssessmentPipeline",
+            "R": "自动生成评分报告，可跟踪质量回归"
+        },
+        keywords=["5维评分", "LLM-as-Judge", "质量评估"]
+    ))
+    
+    # 记录练习
+    tool.record_practice("请描述你测试 AI 模型/API 的经验", 180, 4, 
+                        "回答流畅，但可以增加更多具体数据")
+    
+    # 获取进度报告
+    report = tool.get_progress_report()
+    print("练习进度报告:")
+    print(f"  总练习次数: {report['total_practiced']}")
+    print(f"  平均分: {report['avg_score']}")
+    print(f"  需要加强的问题: {report['needs_work_count']}")
+```
+
+---
+
+## 练习题
+
+1. **基础题：** 使用上面的 `InterviewPrepTool`，添加 3 个你觉得最常被问到的 AI 测试面试问题，并填写完整的 STAR 回答。
+
+2. **进阶题：** 模拟一次完整的面试练习，选择 5 道问题，每道题练习 3 分钟，然后给自己打分并记录反馈。
+
+3. **挑战题：** 设计一个 AI 面试模拟工具，能够自动生成问题、记录回答时长、提供改进建议。
 
 ---
 
