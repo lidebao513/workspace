@@ -1,5 +1,12 @@
 # 补充 Day 6 — RAG 测试体系总结
 
+## 学习目标
+
+1. 理解 RAG 测试的三层验证架构（检索层、生成层、端到端）
+2. 掌握各层的核心测试指标和方法
+3. 熟悉 RAG 的典型故障模式和测试策略
+4. 能设计完整的 RAG 测试方案
+
 > 目标：汇总 Week 1 的 RAG 测试体系，理清三层验证的关系，更新简历内容。
 
 ---
@@ -109,7 +116,225 @@
 
 ---
 
-## 七、自检清单
+## 七、面试题
+
+**Q: RAG 测试为什么需要三层验证？**
+A: RAG 系统的质量取决于检索和生成两个环节，任何一个环节出问题都会导致最终回答质量下降。检索层测召回质量，生成层测幻觉率，端到端测整体效果。三层验证可以定位问题出在哪个环节，便于针对性优化。
+
+**Q: 如何检测 RAG 系统中的幻觉？**
+A: 检测幻觉主要通过事实核对：从回答中提取实体和数值断言，与知识库对照，计算 Hit Rate 和 Hallucination Rate。此外，还可以通过检查回答中的模糊词比例、多轮对话中的实体一致性来辅助检测。
+
+**Q: 什么是降级测试？为什么重要？**
+A: 降级测试验证系统在异常情况下的行为，比如检索失败、空结果、超时等。RAG 系统必须有降级兜底机制，否则会直接报错影响用户体验。降级测试确保系统在异常情况下仍能优雅处理。
+
+**Q: 如何设计 RAG 系统的回归测试？**
+A: 构建标注测试集，覆盖核心场景（有答案、无答案、有矛盾、检索为空）。每次知识库更新或模型更新后，自动运行回归测试，监控各项指标是否退化。重点关注 Precision@K、Recall@K、幻觉率等关键指标。
+
+## 八、代码示例
+
+### RAG 全链路测试框架
+
+```python
+from typing import List, Dict, Tuple
+from enum import Enum
+
+class TestResult(Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    SKIP = "SKIP"
+
+class RAGTestFramework:
+    """RAG 全链路测试框架"""
+    
+    def __init__(self, retrieval_metrics, embedding_tester, hallucination_detector):
+        self.retrieval_metrics = retrieval_metrics
+        self.embedding_tester = embedding_tester
+        self.hallucination_detector = hallucination_detector
+    
+    def test_retrieval_layer(self, queries: List[Dict], k: int = 3) -> Dict:
+        """测试检索层"""
+        results = self.retrieval_metrics.analyze_queries(queries, k)
+        
+        # 检查指标是否达标
+        checks = {
+            'precision_ok': results['precision_at_k'] >= 0.7,
+            'recall_ok': results['recall_at_k'] >= 0.6,
+            'ndcg_ok': results['ndcg_at_k'] >= 0.7
+        }
+        
+        return {
+            'metrics': results,
+            'checks': checks,
+            'passed': all(checks.values())
+        }
+    
+    def test_generation_layer(self, qa_pairs: List[Tuple[str, str, str]]) -> Dict:
+        """测试生成层"""
+        total = len(qa_pairs)
+        passed = 0
+        hallucinations = 0
+        
+        for query, context, answer in qa_pairs:
+            # 事实核对
+            result = self.hallucination_detector.check_facts(answer, context)
+            
+            if result['hallucination_rate'] < 0.3:
+                passed += 1
+            else:
+                hallucinations += 1
+        
+        return {
+            'total': total,
+            'passed': passed,
+            'hallucinations': hallucinations,
+            'hallucination_rate': hallucinations / total,
+            'accuracy': passed / total
+        }
+    
+    def test_e2e_scenario(self, scenario: Dict) -> Dict:
+        """测试端到端场景"""
+        scenario_name = scenario['name']
+        test_cases = scenario['test_cases']
+        results = []
+        
+        for case in test_cases:
+            result = {
+                'case': case['description'],
+                'expected': case['expected'],
+                'actual': None,
+                'passed': False
+            }
+            
+            try:
+                # 模拟 RAG 流程
+                query = case['query']
+                context = case.get('context', "")
+                
+                # 评估回答质量
+                if case['expected'] == 'has_answer':
+                    result['passed'] = len(context) > 0
+                elif case['expected'] == 'no_answer':
+                    result['passed'] = len(context) == 0
+                elif case['expected'] == 'no_hallucination':
+                    result['passed'] = True  # 简化处理
+                
+                result['actual'] = "success" if result['passed'] else "failed"
+            except Exception as e:
+                result['actual'] = str(e)
+            
+            results.append(result)
+        
+        passed_count = sum(1 for r in results if r['passed'])
+        
+        return {
+            'scenario': scenario_name,
+            'total': len(results),
+            'passed': passed_count,
+            'failed': len(results) - passed_count,
+            'details': results
+        }
+    
+    def run_full_suite(self, retrieval_queries, generation_pairs, e2e_scenarios) -> Dict:
+        """运行完整测试套件"""
+        print("=== 开始 RAG 全链路测试 ===")
+        
+        # 检索层测试
+        print("\n1. 检索层测试")
+        retrieval_result = self.test_retrieval_layer(retrieval_queries)
+        print(f"   Precision@3: {retrieval_result['metrics']['precision_at_k']:.4f}")
+        print(f"   Recall@3: {retrieval_result['metrics']['recall_at_k']:.4f}")
+        print(f"   NDCG@3: {retrieval_result['metrics']['ndcg_at_k']:.4f}")
+        print(f"   检查结果: {'通过' if retrieval_result['passed'] else '未通过'}")
+        
+        # 生成层测试
+        print("\n2. 生成层测试")
+        generation_result = self.test_generation_layer(generation_pairs)
+        print(f"   准确率: {generation_result['accuracy']:.4f}")
+        print(f"   幻觉率: {generation_result['hallucination_rate']:.4f}")
+        
+        # 端到端测试
+        print("\n3. 端到端测试")
+        e2e_results = []
+        for scenario in e2e_scenarios:
+            result = self.test_e2e_scenario(scenario)
+            e2e_results.append(result)
+            print(f"   {scenario['name']}: {result['passed']}/{result['total']} 通过")
+        
+        # 汇总报告
+        overall_passed = retrieval_result['passed'] and generation_result['accuracy'] >= 0.8
+        print(f"\n=== 测试完成 ===")
+        print(f"整体结果: {'通过' if overall_passed else '未通过'}")
+        
+        return {
+            'retrieval': retrieval_result,
+            'generation': generation_result,
+            'e2e': e2e_results,
+            'overall_passed': overall_passed
+        }
+
+# 简化的幻觉检测器（用于示例）
+class MockHallucinationDetector:
+    def check_facts(self, answer: str, context: str) -> Dict:
+        # 简化实现：检查回答是否包含上下文中的关键词
+        context_keywords = set(context.lower().split()[:10])
+        answer_keywords = set(answer.lower().split())
+        
+        overlap = len(context_keywords & answer_keywords)
+        hallucination_rate = 0.0 if overlap > 0 else 0.5
+        
+        return {
+            'hallucination_rate': hallucination_rate,
+            'hit_rate': overlap / len(context_keywords) if context_keywords else 1.0
+        }
+
+# 使用示例
+if __name__ == "__main__":
+    from e3_retrieval_metrics import RetrievalMetrics
+    
+    # 初始化测试框架
+    rag_tester = RAGTestFramework(
+        retrieval_metrics=RetrievalMetrics(),
+        embedding_tester=None,  # 可传入实际的 EmbeddingTester
+        hallucination_detector=MockHallucinationDetector()
+    )
+    
+    # 测试数据
+    retrieval_queries = RetrievalMetrics.get_sample_queries()
+    
+    generation_pairs = [
+        ("AI测试需要哪些技能", "AI测试工程师需要掌握Python、pytest、API测试", 
+         "AI测试工程师需要掌握Python、pytest和API测试技能"),
+        ("什么是RAG", "RAG是检索增强生成", "RAG是一种通过检索外部知识库来增强大模型回答的技术")
+    ]
+    
+    e2e_scenarios = [
+        {
+            'name': '有答案场景',
+            'test_cases': [
+                {'description': '正常查询', 'query': 'AI测试技能', 'context': 'Python测试', 'expected': 'has_answer'}
+            ]
+        },
+        {
+            'name': '无答案场景',
+            'test_cases': [
+                {'description': '知识库无相关内容', 'query': '未知问题', 'context': '', 'expected': 'no_answer'}
+            ]
+        }
+    ]
+    
+    # 运行测试
+    report = rag_tester.run_full_suite(retrieval_queries, generation_pairs, e2e_scenarios)
+```
+
+## 九、练习题
+
+1. **基础题：** 扩展 `MockHallucinationDetector`，添加更多事实核对逻辑。
+
+2. **进阶题：** 设计一个完整的 RAG 端到端测试场景，覆盖所有典型故障模式。
+
+3. **挑战题：** 实现一个测试报告生成器，将测试结果输出为 Markdown 格式的报告。
+
+## 十、自检清单
 
 - [ ] 能画出 RAG 三层测试架构图
 - [ ] 能说出 Precision@K vs Recall@K 的 trade-off

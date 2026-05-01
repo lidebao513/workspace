@@ -1,5 +1,12 @@
 # 补充 Day 1 — RAG 原理与架构理解
 
+## 学习目标
+
+1. 理解 RAG 的核心概念和工作原理
+2. 掌握 RAG 四大步骤（Embedding、Retrieval、Augment、Generate）
+3. 理解三个关键决策点（Chunk 策略、检索方式、重排序）
+4. 掌握 RAG 的典型故障模式和测试方法
+
 > 目标：掌握 RAG 系统的工作原理、关键组件和典型故障模式，为后续测试打下理论基础。
 
 ---
@@ -196,7 +203,118 @@ RAG 测试 → 三个层次
 
 ---
 
-## 六、自检清单
+## 六、面试题
+
+**Q: RAG 相比传统 LLM 有什么优势？**
+A: RAG 的核心优势在于知识的时效性和可更新性。传统 LLM 的知识截止于训练数据，而 RAG 通过检索外部知识库获取最新信息。此外，RAG 可以使用内部文档作为知识库，避免敏感数据泄露；当模型产生幻觉时，可以追溯到具体的参考资料；知识库更新后，回答会自动同步更新，无需重新训练模型。
+
+**Q: 如何设计 RAG 的测试策略？**
+A: RAG 测试需要分层验证：检索层测 Precision@K、Recall@K、MRR、NDCG 等指标；生成层测幻觉率、忠实度、完整性；端到端测答案准确率、用户满意度和降级处理。这三个层次任何一个出问题，最终回答都会有问题。
+
+**Q: Chunk 切分策略对 RAG 效果有什么影响？**
+A: Chunk 切分直接影响检索质量。固定大小切分简单但可能截断语义；语义切分能保持段落完整性但长度不均匀；递归切分适合混合长度文档但实现复杂。通常推荐语义切分加固定大小兜底的策略。
+
+**Q: 混合检索为什么是工业界的最佳实践？**
+A: 混合检索结合了向量检索和关键词检索的优点。向量检索擅长语义匹配，关键词检索擅长精确匹配。两者加权排序后，既能理解用户意图，又能准确匹配关键信息，是综合效果最优的方案。
+
+## 七、代码示例
+
+### RAG 流程简化实现
+
+```python
+from typing import List, Dict
+import numpy as np
+
+class SimpleRAG:
+    """简化版 RAG 系统"""
+    
+    def __init__(self):
+        self.document_chunks = []  # 存储文档片段
+        self.chunk_vectors = []    # 存储对应的向量
+    
+    def add_document(self, text: str, chunk_size: int = 256):
+        """添加文档并切分成片段"""
+        tokens = text.split()
+        for i in range(0, len(tokens), chunk_size):
+            chunk = " ".join(tokens[i:i+chunk_size])
+            self.document_chunks.append(chunk)
+            # 模拟向量化（实际中调用 Embedding API）
+            self.chunk_vectors.append(self._mock_embed(chunk))
+    
+    def _mock_embed(self, text: str) -> List[float]:
+        """模拟 Embedding 向量化"""
+        # 简单哈希生成固定长度向量
+        import hashlib
+        hash_val = int(hashlib.md5(text.encode()).hexdigest(), 16)
+        return [(hash_val >> (i * 8)) % 256 / 256 for i in range(32)]
+    
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """计算余弦相似度"""
+        dot = sum(a * b for a, b in zip(vec1, vec2))
+        norm1 = sum(a * a for a in vec1) ** 0.5
+        norm2 = sum(b * b for b in vec2) ** 0.5
+        return dot / (norm1 * norm2) if norm1 and norm2 else 0.0
+    
+    def retrieve(self, query: str, top_k: int = 3) -> List[str]:
+        """检索相关文档片段"""
+        query_vec = self._mock_embed(query)
+        
+        # 计算相似度并排序
+        similarities = [
+            (i, self._cosine_similarity(query_vec, vec))
+            for i, vec in enumerate(self.chunk_vectors)
+        ]
+        
+        # 按相似度降序排序
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        
+        # 返回 Top-K 结果
+        return [self.document_chunks[i] for i, _ in similarities[:top_k]]
+    
+    def generate(self, query: str, top_k: int = 3) -> str:
+        """生成增强后的回答"""
+        chunks = self.retrieve(query, top_k)
+        
+        if not chunks:
+            return "抱歉，我没有找到相关资料来回答这个问题。"
+        
+        # 构建增强 Prompt
+        context = "\n".join(f"- {chunk}" for chunk in chunks)
+        augmented_prompt = f"""请基于以下参考资料回答问题：
+        
+参考资料：
+{context}
+
+问题：{query}
+"""
+        
+        # 模拟生成回答（实际中调用 LLM）
+        return f"根据参考资料，关于 '{query}' 的回答如下：\n\n资料显示：{chunks[0][:100]}..."
+
+# 使用示例
+if __name__ == "__main__":
+    rag = SimpleRAG()
+    
+    # 添加知识库文档
+    rag.add_document("""AI测试工程师需要掌握Python、pytest、API测试等技能。
+    还需要了解LLM的基本原理，以及如何评估模型输出质量。
+    熟悉CI/CD流程和性能测试也是加分项。""")
+    
+    # 查询
+    query = "AI测试岗位需要什么技能？"
+    result = rag.generate(query)
+    print(result)
+```
+
+## 八、练习题
+
+1. **基础题：** 为 `SimpleRAG` 类添加一个方法，计算检索结果的 Precision@K（假设已知哪些文档是相关的）。
+
+2. **进阶题：** 实现一个函数，比较不同 Chunk 大小（如 128、256、512）对检索结果的影响。
+
+3. **挑战题：** 设计一个完整的 RAG 测试用例，覆盖检索不相关、遗漏关键信息、检索超时三种故障模式。
+
+## 九、自检清单
 
 - [ ] 能口述 RAG 四个步骤及每个步骤的作用
 - [ ] 理解 Embedding 向量与余弦相似度的关系
