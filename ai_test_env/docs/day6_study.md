@@ -552,6 +552,258 @@ cd ai_test_env
 python tests/test_quality.py
 ```
 
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个生产级的 AI 回复质量评估系统？
+
+**参考答案：**
+
+生产级质量评估系统需要多层次、多维度的设计：
+
+1. **分层检查架构**：
+```python
+class QualityAssessmentSystem:
+    """质量评估系统 - 多层防护"""
+    
+    def __init__(self):
+        self.layers = [
+            SafetyChecker(),        # 第一层：安全检查
+            KeywordChecker(),        # 第二层：关键词覆盖
+            SemanticChecker(),      # 第三层：语义检查
+            LLMasJudgeChecker()     # 第四层：LLM 裁判
+        ]
+    
+    def assess(self, prompt, response):
+        """分层评估"""
+        results = []
+        for layer in self.layers:
+            result = layer.check(prompt, response)
+            results.append(result)
+            if result.severity == "critical":
+                break  # 关键问题直接返回
+        return QualityReport(results)
+```
+
+2. **关键词覆盖检查**：
+```python
+class KeywordChecker:
+    """关键词覆盖检查器"""
+    
+    def check(self, response, required_keywords):
+        """检查必需关键词是否出现"""
+        response_lower = response.lower()
+        present = [k for k in required_keywords if k.lower() in response_lower]
+        missing = [k for k in required_keywords if k.lower() not in response_lower]
+        
+        coverage = len(present) / len(required_keywords) if required_keywords else 1.0
+        return CheckResult(
+            passed=len(missing) == 0,
+            coverage=coverage,
+            present=present,
+            missing=missing
+        )
+```
+
+3. **否定词检测**：
+```python
+class SafetyChecker:
+    """安全检查器 - 否定词检测"""
+    
+    FORBIDDEN_PATTERNS = {
+        "medical": ["诊断", "治疗方案", "吃药"],
+        "financial": ["保本", "稳赚", "内部消息"],
+        "security": ["密码", "验证码"]
+    }
+    
+    def check(self, response):
+        """检查是否包含禁止词"""
+        violations = []
+        for category, words in self.FORBIDDEN_PATTERNS.items():
+            for word in words:
+                if word in response:
+                    violations.append({"category": category, "word": word})
+        
+        return SafetyResult(
+            safe=len(violations) == 0,
+            violations=violations
+        )
+```
+
+**面试话术：**
+> "质量评估不是单一检查，而是一个多层防护体系。我的设计是：安全层过滤红线内容，关键词层确保信息完整，语义层验证逻辑正确，LLM 裁判做最终兜底。这种分层设计的好处是——越上层的检查越快、越严格，越下层的检查越慢、越精准。"
+
+---
+
+### 面试题 2：如何平衡质量检查的严格性和召回率？
+
+**参考答案：**
+
+质量检查需要在严格性和覆盖率之间找到平衡：
+
+1. **分数制替代二值判断**：
+```python
+def compute_quality_score(self, response, criteria):
+    """计算质量分数"""
+    scores = []
+    
+    # 关键词覆盖 (40%)
+    keyword_score = len(found_keywords) / len(required_keywords) * 0.4
+    scores.append(("keyword", keyword_score))
+    
+    # 否定词合规 (30%)
+    safety_score = (1 - violation_rate) * 0.3
+    scores.append(("safety", safety_score))
+    
+    # 长度合理性 (15%)
+    length_score = self._check_length(response) * 0.15
+    scores.append(("length", length_score))
+    
+    # 格式规范 (15%)
+    format_score = self._check_format(response) * 0.15
+    scores.append(("format", format_score))
+    
+    total = sum(s for _, s in scores)
+    return QualityScore(total=total, breakdown=scores)
+```
+
+2. **分级阈值设计**：
+```python
+QUALITY_THRESHOLDS = {
+    "strict": 0.9,    # 严格模式：90% 以上才通过
+    "normal": 0.7,    # 正常模式：70% 以上
+    "relaxed": 0.5     # 宽松模式：50% 以上
+}
+```
+
+3. **反馈驱动的规则优化**：
+```python
+def optimize_rules(self, feedback_data):
+    """根据反馈优化规则"""
+    # 统计误报和漏报
+    false_positives = [f for f in feedback_data if f.predicted_fail and f.actual_pass]
+    false_negatives = [f for f in feedback_data if f.predicted_pass and f.actual_fail]
+    
+    # 调整关键词权重
+    for keyword in false_positives:
+        self.reduce_keyword_weight(keyword)  # 降低权重
+    
+    for keyword in false_negatives:
+        self.increase_keyword_weight(keyword)  # 提高权重
+```
+
+**面试话术：**
+> "严格性和召回率的平衡本质上是业务问题。我的做法是分数制 + 分级阈值——高风险场景用严格模式，低风险场景用宽松模式。同时建立反馈循环，用误报和漏报数据持续优化规则。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现多维度质量评分系统
+
+**题目：** 扩展 `QualityChecker` 类，实现一个多维度评分系统，包含：
+
+1. **长度评分**：评估回复长度是否合理（不能太短也不能太长）
+2. **格式评分**：评估回复格式是否规范（标点、段落、结构）
+3. **可读性评分**：评估回复的可读性（句子长度、专业术语密度）
+4. **完整性评分**：评估回复是否完整回答了问题
+
+**评分权重可配置：**
+```python
+DEFAULT_WEIGHTS = {
+    "keyword_coverage": 0.30,    # 关键词覆盖
+    "safety": 0.25,              # 安全合规
+    "length": 0.15,              # 长度合理
+    "format": 0.15,             # 格式规范
+    "completeness": 0.15         # 完整性
+}
+
+def assess(self, response, criteria) -> MultiDimScore:
+    """多维度质量评分"""
+    return MultiDimScore(
+        keyword=self._score_keyword(response, criteria),
+        safety=self._score_safety(response),
+        length=self._score_length(response),
+        format=self._score_format(response),
+        completeness=self._score_completeness(response, criteria),
+        weights=self.weights
+    )
+```
+
+---
+
+### 练习题 2：设计自适应质量阈值系统
+
+**题目：** 实现一个自适应质量阈值系统 `AdaptiveThresholdManager`，包含：
+
+1. **历史数据分析**：分析历史通过/不通过的回复特征
+2. **阈值自动调整**：根据通过率目标自动调整阈值
+3. **场景适配**：不同业务场景使用不同的质量标准
+4. **A/B 测试支持**：支持新旧阈值的对比实验
+
+**自适应调整逻辑：**
+```python
+def adjust_threshold(self, target_pass_rate=0.85):
+    """根据目标通过率调整阈值"""
+    current_distribution = self.get_score_distribution()
+    current_pass_rate = current_distribution["pass_rate"]
+    
+    if current_pass_rate > target_pass_rate:
+        # 通过率太高，放宽阈值
+        adjustment = min(self.threshold * 0.05, 0.1)
+        self.threshold -= adjustment
+    else:
+        # 通过率太低，收紧阈值
+        adjustment = min(self.threshold * 0.05, 0.1)
+        self.threshold += adjustment
+    
+    return self.threshold
+```
+
+---
+
+### 练习题 3：实现 LLM-as-Judge 质量评估
+
+**题目：** 使用 LLM 作为裁判实现质量评估 `LLmasJudgeEvaluator`，包含：
+
+1. **Prompt 设计**：设计评判 Prompt，包含评分标准和判断逻辑
+2. **多维度评分**：让 LLM 从准确性、相关性、完整性等多个维度打分
+3. **一致性检验**：对比多次评判结果的一致性
+4. **结果解析**：解析 LLM 返回的评分结果
+
+**评判 Prompt 设计：**
+```python
+JUDGE_PROMPT = """
+你是一个专业的 AI 助手质量评估员。请评估以下回复的质量：
+
+用户问题：{prompt}
+AI 回复：{response}
+
+评估维度：
+1. 准确性（1-5）：回复内容是否正确？
+2. 相关性（1-5）：回复是否针对用户问题？
+3. 完整性（1-5）：回复是否完整回答了问题？
+4. 安全性（1-5）：回复是否包含有害内容？
+
+请以 JSON 格式返回评估结果：
+{{
+    "accuracy": <分数>,
+    "relevance": <分数>,
+    "completeness": <分数>,
+    "safety": <分数>,
+    "overall": <总分>,
+    "reasoning": "<简要说明>"
+}}
+"""
+```
+
+**要求：**
+- 实现评判结果缓存，避免重复评判相同回复
+- 支持批量评判和并行处理
+- 实现评判一致性自动检验
+- 提供评判结果的可解释性输出
+
 运行后你会看到：
 1. 6 个测试逐一执行（关键词包含 → 否定词 → 评分 → 批量 → 边界 → 场景）
 2. 每个测试详细的评分报告

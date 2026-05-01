@@ -447,7 +447,339 @@ cd C:\Users\69037\.openclaw\workspace\ai_test_env
 python -m tests.test_pipeline_assessment
 ```
 
-期望输出中 6 个测试全部显示 [OK]。
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个完整的 AI 模型质量评估流水线？
+
+**参考答案：**
+
+完整评估流水线需要整合多个质量维度：
+
+1. **流水线架构设计**：
+```python
+class AssessmentPipeline:
+    """端到端质量评估流水线"""
+    
+    def __init__(self):
+        self.stages = [
+            QualityCheckStage(),      # Day 6: 关键词 + 否定检测
+            ConsistencyStage(),       # Day 7: 多轮一致性
+            TruncationStage(),        # Day 8: 截断率检测
+            LLMJudgeStage()           # Day 9: LLM-as-Judge
+        ]
+        self.pipeline_config = {
+            "quality_threshold": 0.7,
+            "consistency_threshold": 0.6,
+            "truncation_max": 0.10,
+            "judge_threshold": 0.6
+        }
+    
+    def run(self, test_cases):
+        """运行完整流水线"""
+        results = []
+        for case in test_cases:
+            stage_results = {}
+            for stage in self.stages:
+                stage_result = stage.execute(case)
+                stage_results[stage.name] = stage_result
+            
+            overall = self._compute_overall_score(stage_results)
+            results.append(PipelineResult(case, stage_results, overall))
+        
+        return PipelineReport(results)
+    
+    def _compute_overall_score(self, stage_results):
+        """自适应权重归一化综合评分"""
+        # 截断率转分数（越低越好）
+        truncation_score = max(0, 1.0 - min(stage_results["truncation"]["rate"], 1.0))
+        
+        # 自适应权重
+        active_modules = [m for m, r in stage_results.items() if r.get("score", 0) > 0]
+        weights = {"quality": 0.25, "consistency": 0.15, "truncation": 0.50, "judge": 0.10}
+        
+        weighted_sum = sum(
+            stage_results[m].get("score", truncation_score if m == "truncation" else 0) * weights[m]
+            for m in active_modules
+        )
+        total_weight = sum(weights[m] for m in active_modules)
+        
+        return weighted_sum / total_weight if total_weight > 0 else 0
+```
+
+2. **版本对比与门禁**：
+```python
+class RegressionGate:
+    """回归测试门禁"""
+    
+    def __init__(self):
+        self.gate_config = {
+            "overall_drop_threshold": 0.05,   # 综合分下降 5% 阻止
+            "judge_drop_threshold": 0.10,     # LLM 评分下降 10% 阻止
+            "new_issues_threshold": 3          # 新增问题 > 3 需审查
+        }
+    
+    def evaluate(self, old_report, new_report):
+        """评估是否允许上线"""
+        deltas = {
+            "overall": new_report.overall - old_report.overall,
+            "quality": new_report.quality - old_report.quality,
+            "consistency": new_report.consistency - old_report.consistency,
+            "truncation": old_report.truncation - new_report.truncation,
+            "judge": new_report.judge - old_report.judge
+        }
+        
+        decisions = []
+        if deltas["overall"] < -self.gate_config["overall_drop_threshold"]:
+            decisions.append("BLOCKED: 综合分下降过多")
+        if deltas["judge"] < -self.gate_config["judge_drop_threshold"]:
+            decisions.append("BLOCKED: LLM 评分下降过多")
+        if new_report.issues > self.gate_config["new_issues_threshold"]:
+            decisions.append("REVIEW: 新增问题较多，需人工审查")
+        
+        return GateDecision(
+            approved=len(decisions) == 0,
+            decisions=decisions,
+            deltas=deltas
+        )
+```
+
+**面试话术：**
+> "评估流水线是 AI 测试的核心基础设施。我的设计是四层评估（质量+一致性+截断+LLM评分）加上自适应权重归一化，确保任何模块缺失都不影响整体评分。版本门禁是三道防线：综合分下降 5% 以上、LLM 评分下降 10% 以上、新增问题超过 3 个都必须人工确认才能上线。"
+
+---
+
+### 面试题 2：如何构建数据驱动的 AI 测试体系？
+
+**参考答案：**
+
+数据驱动的测试体系需要持续收集、分析和优化：
+
+1. **测试数据中心设计**：
+```python
+class TestDataCenter:
+    """测试数据中心"""
+    
+    def __init__(self):
+        self.test_cases = []      # 测试用例库
+        self.evaluation_results = []  # 评估结果库
+        self.baselines = {}        # 基线数据
+        self.trends = {}           # 趋势数据
+    
+    def record_evaluation(self, test_case, result):
+        """记录评估结果"""
+        self.evaluation_results.append({
+            "test_case_id": test_case.id,
+            "timestamp": datetime.now(),
+            "model_version": result.model_version,
+            "scores": result.scores,
+            "overall": result.overall
+        })
+    
+    def compute_baseline(self, model_version):
+        """计算指定版本的基线"""
+        results = [r for r in self.evaluation_results 
+                   if r["model_version"] == model_version]
+        if not results:
+            return None
+        
+        return {
+            "quality_avg": np.mean([r["scores"]["quality"] for r in results]),
+            "consistency_avg": np.mean([r["scores"]["consistency"] for r in results]),
+            "truncation_avg": np.mean([r["scores"]["truncation"] for r in results]),
+            "judge_avg": np.mean([r["scores"]["judge"] for r in results]),
+            "sample_size": len(results)
+        }
+    
+    def detect_drift(self, current_version, reference_version):
+        """检测质量漂移"""
+        current = self.compute_baseline(current_version)
+        reference = self.compute_baseline(reference_version)
+        
+        drifts = []
+        for metric in ["quality", "consistency", "judge"]:
+            delta = current[f"{metric}_avg"] - reference[f"{metric}_avg"]
+            if abs(delta) > 0.1:  # 10% 变化阈值
+                drifts.append({
+                    "metric": metric,
+                    "delta": delta,
+                    "direction": "up" if delta > 0 else "down"
+                })
+        
+        return {"has_drift": len(drifts) > 0, "drifts": drifts}
+```
+
+2. **自动化报告生成**：
+```python
+class AutoReportGenerator:
+    """自动报告生成器"""
+    
+    def generate(self, pipeline_result, baseline=None):
+        """生成可视化报告"""
+        report_sections = []
+        
+        # 概览部分
+        report_sections.append(self._generate_summary(pipeline_result))
+        
+        # 趋势部分
+        if baseline:
+            report_sections.append(self._generate_trend_comparison(baseline, pipeline_result))
+        
+        # 详细数据部分
+        report_sections.append(self._generate_detail_tables(pipeline_result))
+        
+        # 建议部分
+        report_sections.append(self._generate_recommendations(pipeline_result))
+        
+        return "\n\n".join(report_sections)
+```
+
+**面试话术：**
+> "数据驱动是 AI 测试的精髓。我的体系是：每个版本的评估结果自动入库，计算基线和趋势；新版本上线前自动对比旧版本，任何质量下降都会触发门禁；每周生成质量周报，管理层能看到质量趋势而不是单点数据。这种方法让测试从'事后发现'变成'事前预防'。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现端到端质量评估流水线监控系统
+
+**题目：** 实现一个端到端质量评估流水线监控系统 `PipelineMonitor`，包含：
+
+1. **实时监控面板**：展示当前流水线运行状态
+2. **历史趋势图表**：展示各指标的历史变化趋势
+3. **异常告警系统**：指标异常时自动告警
+4. **报告自动生成**：生成日报、周报、月报
+
+**监控面板数据结构：**
+```python
+class PipelineMonitor:
+    def __init__(self):
+        self.metrics_store = []
+        self.alert_rules = {
+            "quality_below": 0.6,
+            "consistency_below": 0.5,
+            "truncation_above": 0.15,
+            "judge_below": 0.55
+        }
+    
+    def record_run(self, pipeline_result):
+        """记录一次流水线运行"""
+        self.metrics_store.append({
+            "timestamp": datetime.now(),
+            "run_id": pipeline_result.run_id,
+            "scores": pipeline_result.overall_scores,
+            "issues": pipeline_result.issues,
+            "duration_seconds": pipeline_result.duration
+        })
+        
+        # 检查是否需要告警
+        alerts = self._check_alerts(pipeline_result)
+        if alerts:
+            self._send_alerts(alerts)
+    
+    def _check_alerts(self, result):
+        """检查是否触发告警"""
+        alerts = []
+        if result.quality < self.alert_rules["quality_below"]:
+            alerts.append({"type": "quality_low", "value": result.quality})
+        if result.truncation > self.alert_rules["truncation_above"]:
+            alerts.append({"type": "truncation_high", "value": result.truncation})
+        return alerts
+```
+
+---
+
+### 练习题 2：实现多模型对比评估系统
+
+**题目：** 实现一个多模型对比评估系统 `MultiModelComparator`，包含：
+
+1. **模型注册**：支持多个模型的注册和管理
+2. **批量对比评估**：对多个模型用同一套测试用例评估
+3. **雷达图生成**：生成多维度对比雷达图
+4. **最优模型推荐**：基于评估结果推荐最优模型
+
+**多模型对比报告格式：**
+```python
+{
+    "test_set": "standard_benchmark_v1",
+    "models": {
+        "deepseek-chat": {
+            "quality": 0.82,
+            "consistency": 0.78,
+            "truncation": 0.03,
+            "judge": 0.75,
+            "overall": 0.78
+        },
+        "qwen-plus": {
+            "quality": 0.79,
+            "consistency": 0.72,
+            "truncation": 0.05,
+            "judge": 0.71,
+            "overall": 0.74
+        }
+    },
+    "comparisons": {
+        "deepseek_vs_qwen": {
+            "winner": "deepseek-chat",
+            "score_diff": 0.04,
+            "significant": True
+        }
+    },
+    "recommendation": {
+        "model": "deepseek-chat",
+        "reason": "在所有维度上均表现最佳"
+    }
+}
+```
+
+---
+
+### 练习题 3：实现自适应测试用例生成系统
+
+**题目：** 实现一个自适应测试用例生成系统 `AdaptiveTestGenerator`，包含：
+
+1. **历史问题分析**：分析历史评估中发现的问题类型
+2. **针对性生成**：根据问题类型生成针对性测试用例
+3. **覆盖度分析**：分析测试用例对各质量维度的覆盖度
+4. **智能扩展**：自动扩展测试用例库
+
+**智能生成逻辑：**
+```python
+class AdaptiveTestGenerator:
+    def __init__(self):
+        self.problem_patterns = {
+            "accuracy": ["事实错误", "逻辑错误", "过时信息"],
+            "safety": ["敏感内容", "不当建议", "隐私泄露"],
+            "consistency": ["矛盾回答", "风格不一致", "记忆丧失"]
+        }
+        self.generated_cases = []
+    
+    def analyze_and_generate(self, evaluation_results):
+        """基于评估结果分析并生成新用例"""
+        # 分析失败案例的模式
+        failure_patterns = self._extract_failure_patterns(evaluation_results)
+        
+        # 针对高频失败模式生成新用例
+        new_cases = []
+        for pattern, frequency in failure_patterns.items():
+            if frequency > 0.2:  # 失败率超过 20% 则生成新用例
+                cases = self._generate_cases_for_pattern(pattern)
+                new_cases.extend(cases)
+        
+        return new_cases
+    
+    def _generate_cases_for_pattern(self, pattern):
+        """为特定模式生成测试用例"""
+        templates = self.problem_patterns.get(pattern, [])
+        return [TestCase(prompt=t, expected_pattern=pattern) for t in templates]
+```
+
+**要求：**
+- 实现测试用例版本管理
+- 支持导入外部测试集
+- 实现测试用例质量评分
+- 支持测试用例去重和合并
 
 ## 十一、Week 2 总结
 

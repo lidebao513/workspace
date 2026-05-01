@@ -1,5 +1,15 @@
 # Day 11 — 多轮对话上下文测试
 
+## 学习目标
+
+1. **理解核心概念**：掌握多轮对话上下文测试的定义、重要性和应用场景
+2. **掌握测试方法**：熟练运用"注入→干扰→验证"三部曲测试方法
+3. **量化评估指标**：学会计算上下文召回率（recall_rate），理解遗忘曲线测试的意义
+4. **识别关键问题**：能够发现模型"断片"的临界点和"中间迷失"问题
+5. **实现测试模块**：能独立实现多轮对话测试脚本和分析工具
+
+---
+
 ## 一、今日目标
 
 > 学会构造多轮对话场景，量化评估 AI 模型在长对话中的信息保持能力。
@@ -432,6 +442,279 @@ tests/test_conversation.py::TestConversationManager::test_token_trend PASSED
 tests/test_conversation.py::TestDetectKeyInfo::test_detect_exact_match PASSED
 tests/test_conversation.py::TestDetectKeyInfo::test_detect_no_match PASSED
 tests/test_conversation.py::TestDetectKeyInfo::test_detect_partial_match PASSED
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个完整的多轮对话上下文测试体系？
+
+**答案：**
+
+设计多轮对话上下文测试体系需要从以下几个维度入手：
+
+**1. 测试架构设计**
+- **注入层**：在对话中放置关键信息（姓名、账号、金额、订单号等）
+- **干扰层**：插入无关对话来模拟真实对话场景
+- **验证层**：在后续轮次询问注入的关键信息
+
+**2. 评估指标体系**
+- **召回率（recall_rate）**：正确回召的关键信息数 / 总注入关键信息数
+- **遗忘曲线**：不同轮次间隔下的召回率变化趋势
+- **有效上下文窗口**：模型能有效保持信息的最大上下文长度
+
+**3. 测试场景覆盖**
+- **金融客服场景**：卡号、金额、交易日期等关键信息保持
+- **医疗问诊场景**：症状描述、病史信息保持
+- **多角色对话场景**：多方对话中的信息传递
+
+**4. 自动化测试流程**
+- 脚本化测试用例生成
+- 自动计算召回率和生成报告
+- 回归测试集成（每次模型更新后自动运行）
+
+**5. 门禁规则**
+- 关键实体召回率 >= 0.9 为通过（金融场景标准更严格）
+- 连续多轮测试通过率下降超过 5% 时触发告警
+
+### 面试题 2：如何应对模型的"中间迷失"问题？
+
+**答案：**
+
+"中间迷失"是指模型在长上下文对话中对中间部分信息的召回率显著下降的问题。应对策略包括：
+
+**测试层面：**
+1. **分段验证**：将长对话分成多个片段，分别测试各片段的信息保持能力
+2. **关键信息标记**：在不同位置（开头、中间、结尾）注入关键信息，分别评估召回率
+3. **动态窗口测试**：在不同上下文长度下测试，找到模型的"甜蜜点"
+
+**优化层面：**
+1. **信息结构化**：使用 XML、JSON 等结构化格式包装关键信息
+2. **关键信息强调**：在对话中重复或高亮关键信息
+3. **分段处理**：将超长对话拆分成多个短对话，使用记忆机制串联
+
+**工程层面：**
+1. **上下文压缩**：使用摘要或向量存储技术压缩历史对话
+2. **关键信息提取**：自动提取并保存对话中的关键实体
+3. **选择性记忆**：只保留与当前对话相关的历史信息
+
+---
+
+## 代码示例
+
+### 多轮对话上下文测试器实现
+
+```python
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Callable
+from enum import Enum
+
+class TurnTag(Enum):
+    GREETING = "greeting"           # 寒暄
+    INFO_INJECTION = "info_injection" # 信息注入
+    DISTRACTOR = "distractor"       # 干扰对话
+    VERIFICATION = "verification"   # 验证
+
+@dataclass
+class Turn:
+    """单轮对话"""
+    role: str                    # user / assistant
+    content: str                 # 本轮内容
+    tokens: int = 0              # 本轮消耗 Token
+    latency_ms: float = 0.0      # 本轮延迟
+    tag: Optional[TurnTag] = None
+    expected: Optional[str] = None  # 验证轮的期望值
+
+@dataclass
+class Conversation:
+    """一次完整的对话会话"""
+    turns: List[Turn] = field(default_factory=list)
+    total_tokens: int = 0
+    total_latency_ms: float = 0.0
+    
+    def to_messages(self):
+        """转为 OpenAI API 的 messages 格式"""
+        return [{"role": t.role, "content": t.content} for t in self.turns]
+
+@dataclass  
+class ContextTestResult:
+    """上下文测试结果"""
+    recall_rate: float
+    conclusion: str
+    details: Dict[str, bool]  # 每个 key 的召回情况
+
+class ConversationTester:
+    """多轮对话上下文测试器"""
+    
+    def __init__(self):
+        self.history = []
+    
+    def build_conversation_script(
+        self,
+        key_info: Dict[str, str],
+        context_turns_before: int = 2,
+        context_turns_after: int = 3,
+    ) -> List[Dict]:
+        """
+        构造测试脚本
+        
+        Args:
+            key_info: 要注入的关键信息字典
+            context_turns_before: 注入前的寒暄轮次
+            context_turns_after: 注入后的干扰轮次
+            
+        Returns:
+            对话脚本列表
+        """
+        script = []
+        
+        # 寒暄阶段
+        greetings = ["你好！", "今天天气不错。", "我想咨询一下产品。"]
+        for i in range(context_turns_before):
+            script.append({
+                "role": "user",
+                "content": greetings[i % len(greetings)],
+                "_tag": TurnTag.GREETING.value
+            })
+        
+        # 注入阶段
+        injection_text = "我来说说我的信息：" + ", ".join(f"{k}={v}" for k, v in key_info.items())
+        script.append({
+            "role": "user", 
+            "content": injection_text,
+            "_tag": TurnTag.INFO_INJECTION.value
+        })
+        
+        # 干扰阶段
+        distractors = ["你们有手机 App 吗？", "周末上班吗？", "产品价格是多少？"]
+        for i in range(context_turns_after):
+            script.append({
+                "role": "user",
+                "content": distractors[i % len(distractors)],
+                "_tag": TurnTag.DISTRACTOR.value
+            })
+        
+        # 验证阶段
+        for key, value in key_info.items():
+            script.append({
+                "role": "user",
+                "content": f"我刚才说的{key}是什么？",
+                "_tag": TurnTag.VERIFICATION.value,
+                "_expected": value
+            })
+        
+        return script
+    
+    def analyze_context(
+        self,
+        key_info: Dict[str, str],
+        recall_responses: Dict[str, str],
+        verification_turn: int = 0
+    ) -> ContextTestResult:
+        """
+        分析上下文保持率
+        
+        Args:
+            key_info: 注入的关键信息
+            recall_responses: 验证轮的回复
+            verification_turn: 验证轮次
+            
+        Returns:
+            测试结果
+        """
+        details = {}
+        correct_count = 0
+        
+        for key, expected in key_info.items():
+            actual = recall_responses.get(key, "")
+            # 精确匹配或包含匹配
+            matched = expected == actual or expected in actual
+            details[key] = matched
+            if matched:
+                correct_count += 1
+        
+        recall_rate = correct_count / len(key_info) if key_info else 0.0
+        
+        # 确定结论
+        if recall_rate >= 1.0:
+            conclusion = "全部保持"
+        elif recall_rate >= 0.8:
+            conclusion = "大部分保持"
+        elif recall_rate >= 0.5:
+            conclusion = "约半数遗忘"
+        else:
+            conclusion = "严重遗忘"
+        
+        result = ContextTestResult(
+            recall_rate=recall_rate,
+            conclusion=conclusion,
+            details=details
+        )
+        
+        self.history.append({
+            "verification_turn": verification_turn,
+            "result": result
+        })
+        
+        return result
+
+# 使用示例
+tester = ConversationTester()
+
+# 1. 构造测试脚本
+key_info = {"name": "张三", "card_last4": "8888"}
+script = tester.build_conversation_script(key_info)
+print("测试脚本构造完成，共", len(script), "轮")
+
+# 2. 模拟执行（实际场景中调用 API）
+# 假设模型回复如下：
+recall_responses = {"name": "张三", "card_last4": "6666"}
+
+# 3. 分析结果
+result = tester.analyze_context(key_info, recall_responses)
+print(f"召回率: {result.recall_rate:.2f}")
+print(f"结论: {result.conclusion}")
+print(f"详情: {result.details}")
+```
+
+---
+
+## 练习题
+
+### 练习题 1：实现遗忘曲线测试
+
+**要求：**
+实现一个遗忘曲线测试函数，在不同间隔轮次（1、3、5、10 轮后）分别验证召回率，并绘制召回率变化曲线。
+
+**步骤：**
+1. 修改 `build_conversation_script` 支持多次验证
+2. 实现 `forget_curve` 函数，在不同延迟后验证
+3. 收集各轮次的召回率数据
+4. 输出遗忘曲线报告
+
+### 练习题 2：实现上下文窗口压力测试
+
+**要求：**
+测试模型在不同上下文长度下的信息保持能力。
+
+**步骤：**
+1. 构造不同长度的对话脚本（4K、8K、16K、32K Token）
+2. 在每个长度下测试关键信息召回率
+3. 找出模型的有效上下文窗口临界点
+4. 输出各长度下的性能报告
+
+### 练习题 3：实现多角色对话测试
+
+**要求：**
+测试多方对话场景中的信息传递能力。
+
+**步骤：**
+1. 定义多角色对话场景（如客服、用户、管理员）
+2. 构造包含角色切换的对话脚本
+3. 验证跨角色的信息保持能力
+4. 分析角色切换对上下文保持的影响
+
+---
 
 22 passed in 0.04s
 ```

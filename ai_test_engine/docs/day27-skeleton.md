@@ -1,5 +1,12 @@
 # Day 27 — 项目骨架 + 核心模块
 
+## 学习目标
+
+1. 理解分层架构设计原则，掌握 config/core/tests 三层分离模式
+2. 掌握 dataclass 在配置管理中的应用，学会环境变量加载与校验
+3. 学会错误分级处理体系（FATAL/ERROR/WARN/INFO）的设计与实现
+4. 理解 Key 轮换与降级策略，实现高可用的 API 调用机制
+
 ## 一、引言
 
 开始搭建 `ai_test_engine` 实战项目。目标是将前 5 周学到的 API 测试、质量评估、安全、性能等模块重新组织为可落地的项目骨架。
@@ -119,14 +126,177 @@ A: dataclass 提供类型提示和 IDE 自动补全，运行时检查更快；di
 **Q: Key 轮换和降级的顺序为什么先换模型再换 Key？**
 A: 成本优先级——切换模型是零成本（改个字符串），切换 Key 需要确认下一个 Key 也是健康的。优先尝试低成本方案。
 
-## 八、产出物
+**Q: 分层架构中，config 层和 core 层的职责边界是什么？**
+A: config 层负责配置的加载、校验和序列化，不包含业务逻辑；core 层负责核心业务逻辑（API 调用、错误处理、Key 管理），可以依赖 config 层获取配置。这样分离的好处是配置变更不影响核心逻辑，核心逻辑变更不影响配置加载方式。
+
+**Q: 如何设计一个生产级的错误处理体系？**
+A: 首先定义错误分级（FATAL/ERROR/WARN/INFO），然后实现统一的错误分类器（ErrorHandler），为每种错误类型定义处理策略（是否重试、是否告警）。关键是将错误分类与处理逻辑解耦，让下游模块可以根据分类结果决定如何处理。
+
+## 八、代码示例
+
+### 完整的 Settings 配置类实现
+
+```python
+from dataclasses import dataclass, asdict
+import os
+from typing import Optional
+
+@dataclass
+class Settings:
+    api_key: str = ""
+    api_base: str = "https://api.deepseek.com"
+    model: str = "deepseek-chat"
+    max_retries: int = 3
+    timeout: int = 30
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    
+    @classmethod
+    def load_from_env(cls) -> 'Settings':
+        """从环境变量加载配置，带兜底默认值"""
+        return cls(
+            api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            api_base=os.getenv("API_BASE_URL", "https://api.deepseek.com"),
+            model=os.getenv("MODEL_NAME", "deepseek-chat"),
+            max_retries=int(os.getenv("MAX_RETRIES", "3")),
+            timeout=int(os.getenv("TIMEOUT", "30")),
+            max_tokens=int(os.getenv("MAX_TOKENS", "4096")),
+            temperature=float(os.getenv("TEMPERATURE", "0.7"))
+        )
+    
+    def validate(self) -> bool:
+        """校验关键字段是否存在"""
+        if not self.api_key or "placeholder" in self.api_key.lower():
+            return False
+        if not self.api_base:
+            return False
+        return True
+    
+    def to_dict(self, exclude_sensitive: bool = True) -> dict:
+        """序列化配置，可选排除敏感字段"""
+        data = asdict(self)
+        if exclude_sensitive and "api_key" in data:
+            data["api_key"] = "***"
+        return data
+
+# 使用示例
+if __name__ == "__main__":
+    settings = Settings.load_from_env()
+    print("配置加载成功:", settings.validate())
+    print("配置信息:", settings.to_dict())
+```
+
+### 完整的 KeyManager 实现
+
+```python
+from dataclasses import dataclass
+from typing import List, Optional
+
+@dataclass
+class KeyInfo:
+    key: str
+    model: str = "deepseek-chat"
+    failure_count: int = 0
+    healthy: bool = True
+
+class KeyManager:
+    def __init__(self):
+        self._keys: List[KeyInfo] = []
+        self._current_index = 0
+    
+    def add_key(self, key: str, model: str = "deepseek-chat") -> None:
+        """添加 Key 到 Key 池"""
+        if key and "placeholder" not in key.lower():
+            self._keys.append(KeyInfo(key=key, model=model))
+    
+    @property
+    def current_key(self) -> Optional[str]:
+        """获取当前 Key"""
+        if self._keys:
+            return self._keys[self._current_index].key
+        return None
+    
+    @property
+    def current_model(self) -> str:
+        """获取当前模型"""
+        if self._keys:
+            return self._keys[self._current_index].model
+        return "deepseek-chat"
+    
+    def rotate_key(self) -> bool:
+        """切换到下一个健康的 Key"""
+        if not self._keys:
+            return False
+        
+        original_index = self._current_index
+        while True:
+            self._current_index = (self._current_index + 1) % len(self._keys)
+            if self._keys[self._current_index].healthy:
+                return True
+            if self._current_index == original_index:
+                # 所有 Key 都不健康
+                return False
+    
+    def degrade(self) -> bool:
+        """降级策略：先换模型，再换 Key"""
+        if not self._keys:
+            return False
+        
+        # 尝试切换到轻量模型
+        if self.current_model == "deepseek-chat":
+            self._keys[self._current_index].model = "deepseek-chat-light"
+            return True
+        
+        # 模型已降级，尝试切换 Key
+        return self.rotate_key()
+    
+    def mark_failure(self) -> None:
+        """标记当前 Key 失败"""
+        if self._keys:
+            self._keys[self._current_index].failure_count += 1
+            # 连续 3 次失败标记为不健康
+            if self._keys[self._current_index].failure_count >= 3:
+                self._keys[self._current_index].healthy = False
+
+# 使用示例
+if __name__ == "__main__":
+    km = KeyManager()
+    km.add_key("sk-xxx1", "deepseek-chat")
+    km.add_key("sk-xxx2", "deepseek-chat")
+    
+    print("当前 Key:", km.current_key)
+    print("当前模型:", km.current_model)
+    
+    # 模拟失败
+    km.mark_failure()
+    km.mark_failure()
+    km.mark_failure()
+    
+    print("Key 是否健康:", km._keys[0].healthy)
+    km.rotate_key()
+    print("切换后 Key:", km.current_key)
+```
+
+## 九、产出物
 
 - `config/settings.py`
 - `core/client.py`
 - `core/error_handler.py`
 - `core/key_manager.py`
 
-## 九、自检清单
+## 十、练习题
+
+1. **基础题：** 修改 `Settings` 类，添加 `api_version` 字段，默认值为 "v1"，并在 `load_from_env()` 方法中添加对应环境变量 `API_VERSION` 的读取。
+
+2. **进阶题：** 为 `KeyManager` 添加 `reset_failure_count()` 方法，用于重置指定 Key 的失败计数。该方法应接受一个可选的 key_index 参数，如果不传则重置当前 Key 的计数。
+
+3. **挑战题：** 实现一个 `ErrorHandler` 类，包含以下功能：
+   - 定义 4 种错误级别：FATAL、ERROR、WARN、INFO
+   - `classify()` 方法根据异常类型返回错误分类字典
+   - `should_retry()` 方法判断是否应该重试（仅 ERROR 和 WARN 级别可重试）
+   - `should_alert()` 方法判断是否应该告警（FATAL 和 ERROR 级别需要告警）
+
+## 十一、自检清单
 
 - [ ] Settings 能读环境变量
 - [ ] validate 能检测缺少 Key
@@ -134,7 +304,7 @@ A: 成本优先级——切换模型是零成本（改个字符串），切换 K
 - [ ] ErrorHandler 能分类 5 种异常
 - [ ] KeyManager 能轮换和降级
 
-## 十、运行验证
+## 十二、运行验证
 
 ```bash
 cd ai_test_engine

@@ -1,5 +1,15 @@
 # Day 15 — E2E 业务场景测试
 
+## 学习目标
+
+1. **理解 E2E 测试**：掌握端到端测试在 AI 测试中的定位和价值
+2. **设计场景模板**：学会设计业务场景模板，包含多轮对话和判定规则
+3. **实现场景引擎**：掌握场景执行引擎的实现，包括多轮对话、规则判定和召回率计算
+4. **生成评分报告**：能够生成场景级评分报告，综合评估模型表现
+5. **构建测试体系**：将之前的测试工具整合为完整的 E2E 测试流水线
+
+---
+
 ## 一、今日目标
 
 > 学会构建完整的端到端（E2E）业务场景测试，将多轮对话、安全检测、规则判定整合为场景级测试流水线。
@@ -325,3 +335,355 @@ tests/test_e2e.py::TestScenarioAndTurn::test_scene_turn_to_dict PASSED
 
 24 passed in 0.03s
 ```
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个完整的 AI 模型 E2E 业务场景测试体系？
+
+**答案：**
+
+设计 AI 模型 E2E 业务场景测试体系需要以下核心组件：
+
+**1. 场景模板库设计**
+- **场景分类**：客服、金融、安全、创意等业务类型
+- **轮次序列**：每轮的预期关键词和限制条件
+- **判定规则**：关键词包含、关键词排除、长度范围
+- **内置场景**：至少包含正常流程、异常流程、安全边界三类场景
+
+**2. 场景执行引擎**
+- **多轮对话管理**：维护对话历史和上下文状态
+- **规则判定**：对每轮回复进行关键词检查、长度检查
+- **信息提取**：自动提取用户信息（手机号、订单号、金额）
+- **上下文召回率计算**：验证关键信息是否在后续轮次中被正确使用
+
+**3. 评分体系**
+- **场景通过率**：每个场景的检查项通过比例
+- **上下文召回率**：关键信息的保持能力
+- **安全违规数**：安全场景中的违规次数
+- **综合评分**：多维度加权得分
+
+**4. 测试策略**
+- **冒烟测试**：每次部署前跑所有场景的简化版
+- **回归测试**：每次 Prompt 变更跑所有场景的完整版
+- **定期巡检**：每周跑一次全量场景，观察通过率趋势
+- **模型对比**：同一套场景测试不同模型的表现
+
+**5. 门禁规则**
+- 整体通过率 >= 80%
+- 安全场景必须 100% 通过
+- 上下文召回率 >= 0.9
+
+### 面试题 2：如何处理 E2E 测试中的不确定性？
+
+**答案：**
+
+E2E 测试中的不确定性主要来自模型输出的多样性，处理策略如下：
+
+**1. 模糊判定代替精确匹配**
+- 使用关键词包含匹配而非精确字符串匹配
+- 允许多种合理的表达方式
+- 使用语义相似度匹配作为补充
+
+**2. 多维度评估**
+- 不只看单一指标，综合评估多个维度
+- 对每个检查项设置权重，计算加权得分
+- 使用连续值评分（0-1.0）代替二值判定
+
+**3. 统计方法**
+- 多次执行取平均值，减少随机性影响
+- 设置置信区间，判断结果的稳定性
+- 使用统计显著性检验判断是否存在真实差异
+
+**4. 人工审核机制**
+- 对不确定的结果进行人工复核
+- 建立反馈闭环，将误判案例加入测试用例库
+- 定期校准判定规则
+
+---
+
+## 代码示例
+
+### E2E 业务场景测试引擎实现
+
+```python
+from typing import List, Dict, Optional, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+import re
+
+class ScenarioType(Enum):
+    CUSTOMER_SERVICE = "customer_service"  # 客服
+    FINANCIAL = "financial"                # 金融
+    SECURITY = "security"                  # 安全
+    CREATIVE = "creative"                  # 创意
+
+@dataclass
+class SceneTurn:
+    role: str                              # user/assistant/system
+    content: str                           # 对话内容
+    expected_keywords: List[str] = field(default_factory=list)   # 期望关键词
+    forbidden_keywords: List[str] = field(default_factory=list)  # 禁止关键词
+    min_length: int = 1                    # 最小长度
+    max_length: int = 2000                 # 最大长度
+
+@dataclass
+class Scenario:
+    id: str                                # 场景 ID
+    name: str                              # 场景名称
+    type: ScenarioType                     # 场景类型
+    description: str                       # 场景描述
+    turns: List[SceneTurn] = field(default_factory=list)
+
+@dataclass
+class ScenarioResult:
+    scenario_id: str
+    scenario_name: str
+    pass_count: int
+    total_checks: int
+    context_recall_rate: float
+    security_violations: int
+    details: List[Dict] = field(default_factory=list)
+
+class ScenarioEngine:
+    """E2E 场景执行引擎"""
+    
+    def __init__(self):
+        self.key_info_store = {}
+    
+    def _judge(self, turn: SceneTurn, response: str) -> Dict:
+        """单轮判定"""
+        result = {
+            "passed": True,
+            "failures": []
+        }
+        
+        # 检查期望关键词
+        for kw in turn.expected_keywords:
+            if kw not in response:
+                result["passed"] = False
+                result["failures"].append(f"missing_keyword:{kw}")
+        
+        # 检查禁止关键词
+        for kw in turn.forbidden_keywords:
+            if kw in response:
+                result["passed"] = False
+                result["failures"].append(f"forbidden_keyword:{kw}")
+        
+        # 检查长度
+        if len(response) < turn.min_length:
+            result["passed"] = False
+            result["failures"].append("too_short")
+        if len(response) > turn.max_length:
+            result["passed"] = False
+            result["failures"].append("too_long")
+        
+        return result
+    
+    def _extract_info(self, content: str):
+        """提取关键信息"""
+        # 手机号
+        phones = re.findall(r'1[3-9]\d{9}', content)
+        if phones:
+            self.key_info_store["phone"] = phones[0]
+        
+        # 订单号
+        orders = re.findall(r'[A-Z]+-\d{4}-\d+', content)
+        if orders:
+            self.key_info_store["order"] = orders[0]
+        
+        # 金额
+        amounts = re.findall(r'(\d+\.?\d*)\s*元', content)
+        if amounts:
+            self.key_info_store["amount"] = amounts[0]
+    
+    def _calc_context_recall(self, responses: List[str]) -> float:
+        """计算上下文召回率"""
+        if not self.key_info_store:
+            return 1.0
+        
+        found_count = 0
+        all_info = " ".join(responses)
+        
+        for key, value in self.key_info_store.items():
+            if value in all_info:
+                found_count += 1
+        
+        return found_count / len(self.key_info_store)
+    
+    def run_scenario(
+        self, 
+        scenario: Scenario, 
+        api_func: Optional[Callable] = None,
+        mock_responses: Optional[Dict[int, str]] = None
+    ) -> ScenarioResult:
+        """执行单个场景"""
+        self.key_info_store = {}
+        pass_count = 0
+        total_checks = 0
+        security_violations = 0
+        details = []
+        responses = []
+        
+        for i, turn in enumerate(scenario.turns):
+            # 跳过预设的 assistant 回复
+            if turn.role == "assistant":
+                continue
+            
+            # 提取用户信息
+            self._extract_info(turn.content)
+            
+            # 获取模型回复
+            if mock_responses and i in mock_responses:
+                response = mock_responses[i]
+            elif api_func:
+                response = api_func(turn.content)
+            else:
+                response = ""
+            
+            responses.append(response)
+            
+            # 判定
+            result = self._judge(turn, response)
+            total_checks += 1
+            if result["passed"]:
+                pass_count += 1
+            else:
+                # 安全场景失败算作违规
+                if scenario.type == ScenarioType.SECURITY:
+                    security_violations += 1
+            
+            details.append({
+                "turn": i,
+                "prompt": turn.content[:30] + "..." if len(turn.content) > 30 else turn.content,
+                "response": response[:50] + "..." if len(response) > 50 else response,
+                "passed": result["passed"],
+                "failures": result["failures"]
+            })
+        
+        context_recall = self._calc_context_recall(responses)
+        
+        return ScenarioResult(
+            scenario_id=scenario.id,
+            scenario_name=scenario.name,
+            pass_count=pass_count,
+            total_checks=total_checks,
+            context_recall_rate=context_recall,
+            security_violations=security_violations,
+            details=details
+        )
+
+class E2ETester:
+    """E2E 测试运行器"""
+    
+    def __init__(self):
+        self.scenarios = []
+    
+    def add_scenario(self, scenario: Scenario):
+        """添加场景"""
+        self.scenarios.append(scenario)
+    
+    def run_all(self, api_func: Callable = None, mock_responses: Dict[str, Dict] = None) -> List[ScenarioResult]:
+        """执行所有场景"""
+        results = []
+        for scenario in self.scenarios:
+            mock_for_scenario = mock_responses.get(scenario.id, {}) if mock_responses else None
+            result = ScenarioEngine().run_scenario(scenario, api_func, mock_for_scenario)
+            results.append(result)
+        return results
+    
+    def run_selected(self, scenario_ids: List[str], api_func: Callable = None) -> List[ScenarioResult]:
+        """执行选定的场景"""
+        results = []
+        for scenario in self.scenarios:
+            if scenario.id in scenario_ids:
+                result = ScenarioEngine().run_scenario(scenario, api_func)
+                results.append(result)
+        return results
+
+# 使用示例
+# 1. 创建场景
+scenario = Scenario(
+    id="SC-CS-001",
+    name="客服-个人信息修改",
+    type=ScenarioType.CUSTOMER_SERVICE,
+    description="测试客服场景下的信息保持能力",
+    turns=[
+        SceneTurn(
+            role="user",
+            content="我想修改我的手机号码",
+            expected_keywords=["修改", "手机号"],
+            forbidden_keywords=["拒绝"]
+        ),
+        SceneTurn(
+            role="assistant",
+            content="好的，请问您的新手机号码是？"
+        ),
+        SceneTurn(
+            role="user",
+            content="13812345678",
+            expected_keywords=["13812345678", "确认"],
+            min_length=10
+        )
+    ]
+)
+
+# 2. 创建测试器并运行
+tester = E2ETester()
+tester.add_scenario(scenario)
+
+# 模拟 API 调用
+mock_responses = {
+    "SC-CS-001": {
+        0: "好的，请问您的新手机号码是？",
+        2: "已为您将手机号码修改为 13812345678，请确认。"
+    }
+}
+
+results = tester.run_all(mock_responses=mock_responses)
+for result in results:
+    print(f"场景: {result.scenario_name}")
+    print(f"通过率: {result.pass_count}/{result.total_checks}")
+    print(f"上下文召回率: {result.context_recall_rate:.2f}")
+    print(f"安全违规: {result.security_violations}")
+```
+
+---
+
+## 练习题
+
+### 练习题 1：实现场景模板生成器
+
+**要求：**
+实现一个场景模板生成器，自动生成各种业务场景的测试模板。
+
+**步骤：**
+1. 定义场景模板配置（类型、轮数、关键信息类型）
+2. 实现模板生成逻辑
+3. 支持随机生成测试数据（手机号、订单号、金额）
+4. 生成可直接使用的场景模板
+
+### 练习题 2：实现场景级评分报告
+
+**要求：**
+实现一个场景级评分报告生成器，生成详细的 HTML 报告。
+
+**步骤：**
+1. 设计报告结构（概览、场景详情、趋势分析）
+2. 实现报告生成函数
+3. 包含通过率、上下文召回率、安全违规统计
+4. 生成可视化图表
+
+### 练习题 3：实现多模型对比测试
+
+**要求：**
+实现一个多模型对比测试框架，对比不同模型在同一套场景上的表现。
+
+**步骤：**
+1. 支持多个 API 函数（不同模型）
+2. 运行同一套场景测试
+3. 生成对比报告（通过率、召回率、响应时间）
+4. 输出模型排名和推荐
+
+---

@@ -1,5 +1,15 @@
 # Day 20 — 测试数据管理
 
+## 学习目标
+
+1. **理解 DataProfile**：掌握数据配置协议（类型比例、种子一致性、版本号）
+2. **掌握 PromptDataFactory**：熟练运用模板替换和随机填充生成测试 Prompt
+3. **掌握 ResponseDataFactory**：理解多类型回复生成（valid/truncated/rejected/empty/error）
+4. **掌握 DataMasker**：熟练使用 5 种敏感信息脱敏方式
+5. **掌握 DataVersionTracker**：理解版本管理和 changelog diff
+
+---
+
 ## 一、今日目标
 
 > 学会管理 AI 测试中的数据集：合成数据生成、敏感信息脱敏、版本追踪。这是 Week 4（自动化框架+工具链）的最后一块拼图——没有好的测试数据，前面的分层、CI、覆盖率都是空中楼阁。
@@ -316,3 +326,394 @@ for text, should_be_sensitive, msg in test_cases:
 - [ ] 知道 5 种脱敏规则和各自的适用场景
 - [ ] 会追踪数据集版本、查看 diff 和 changelog
 - [ ] 理解 checksum 在数据完整性中的作用
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个可重复的测试数据生成系统？
+
+**答案：**
+
+设计可重复的测试数据生成系统需要考虑种子机制、模板系统和版本控制：
+
+**1. 种子机制（Seed）**
+- 相同种子生成完全相同的数据
+- 确保跨版本测试可对比
+- 支持随机性和确定性的平衡
+
+```python
+import random
+
+class SeededRandom:
+    def __init__(self, seed: int):
+        self.rng = random.Random(seed)
+    
+    def choice(self, seq):
+        return self.rng.choice(seq)
+    
+    def sample(self, seq, k):
+        return self.rng.sample(seq, k)
+```
+
+**2. 模板系统**
+- 模板类型：definition、explanation、writing、comparison、steps、code、analysis
+- 插槽填充：从种子池中随机取值
+- 支持批量生成
+
+**3. 配置管理**
+```python
+profile = DataProfile(
+    name="test_suite",
+    count=100,
+    seed=42,
+    version="1.0.0",
+    categories=[DataCategory.SQL_INJECTION, DataCategory.XSS]
+)
+```
+
+**4. 版本控制**
+- 版本号格式：major.minor.patch
+- 变更记录：added、modified、checksum
+- 支持版本对比和回滚
+
+### 面试题 2：测试数据脱敏的最佳实践是什么？
+
+**答案：**
+
+测试数据脱敏是保护用户隐私的重要措施：
+
+**1. 脱敏规则矩阵**
+
+| 类型 | 模式 | 替换格式 | 适用场景 |
+|------|------|---------|---------|
+| 邮箱 | `***@domain.com` | `***@domain.com` | 日志、报告 |
+| 手机号 | `138****5678` | 中间4位脱敏 | 测试数据 |
+| 身份证 | `310***1234` | 前3后4脱敏 | 金融场景 |
+| API Key | `sk-***` | 前缀保留 | 安全测试 |
+| IP 地址 | `10.***.***.100` | 网段保留 | 网络测试 |
+
+**2. 脱敏时机**
+- **生成时脱敏**：数据生成阶段直接脱敏
+- **使用前脱敏**：在数据使用前统一处理
+- **输出时脱敏**：在日志/报告中脱敏
+
+**3. 验证流程**
+```python
+# 脱敏后必须验证
+assert not masker.has_sensitive_data(sanitized_text)
+assert masker.has_sensitive_data(original_text)  # 原始数据应该被识别
+```
+
+**4. 注意事项**
+- 保留数据格式特征用于测试
+- 脱敏后数据仍需可用
+- 防止重标识攻击
+
+---
+
+## 代码示例
+
+### 测试数据管理器实现
+
+```python
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import re
+import hashlib
+import random
+
+class DataCategory(Enum):
+    SQL_INJECTION = "sql_injection"
+    XSS = "xss"
+    PROMPT_LEAK = "prompt_leak"
+    NORMAL = "normal"
+
+class ResponseType(Enum):
+    VALID = "valid"
+    TRUNCATED = "truncated"
+    REJECTED = "rejected"
+    EMPTY = "empty"
+    ERROR = "error"
+
+@dataclass
+class DataProfile:
+    name: str
+    count: int
+    seed: int = 42
+    version: str = "1.0.0"
+    categories: List[DataCategory] = field(default_factory=list)
+    response_type_ratios: Dict[str, float] = field(default_factory=lambda: {
+        "valid": 0.70,
+        "truncated": 0.10,
+        "rejected": 0.10,
+        "empty": 0.05,
+        "error": 0.05
+    })
+
+class PromptDataFactory:
+    """Prompt 数据工厂"""
+    
+    TEMPLATES = {
+        "definition": "What is {topic}?",
+        "explanation": "Explain {concept} in {style} terms",
+        "writing": "Write a {length} {genre} about {subject}",
+        "comparison": "Compare and contrast {A} and {B}",
+        "steps": "Step-by-step guide to {topic}",
+        "code": "Write {lang} code to {task}",
+        "analysis": "Analyze {scenario} and provide {depth} insights"
+    }
+    
+    SEED_POOLS = {
+        "topic": ["deep learning", "NLP", "regression testing", "CI/CD", "Docker"],
+        "concept": ["gradient descent", "overfitting", "dependency injection", "microservices"],
+        "style": ["simple", "expert", "layman", "technical"],
+        "length": ["short", "medium", "long"],
+        "genre": ["poem", "essay", "report", "email"],
+        "subject": ["AI testing", "machine learning", "software quality", "DevOps"],
+        "A": ["CNNs", "RNNs", "Transformers", "BERT"],
+        "B": ["LSTMs", "GRUs", "ResNet", "GPT"],
+        "lang": ["Python", "JavaScript", "Go", "Rust"],
+        "task": ["sort a list", "implement a queue", "parse JSON", "connect to DB"],
+        "scenario": ["this log file", "the user feedback", "the system metrics", "the error report"],
+        "depth": ["shallow", "moderate", "deep", "comprehensive"]
+    }
+    
+    def __init__(self, seed: int = 42):
+        self.seed = seed
+        self.rng = random.Random(seed)
+    
+    def _fill_slot(self, slot: str) -> str:
+        pool = self.SEED_POOLS.get(slot, [])
+        if not pool:
+            return slot
+        return self.rng.choice(pool)
+    
+    def _fill_template(self, template: str) -> str:
+        result = template
+        for match in re.finditer(r'\{(\w+)\}', template):
+            slot = match.group(1)
+            value = self._fill_slot(slot)
+            result = result.replace(f"{{{slot}}}", value)
+        return result
+    
+    def generate_one(self, prompt_type: str, **kwargs) -> str:
+        template = self.TEMPLATES.get(prompt_type, "{topic}")
+        for key, value in kwargs.items():
+            template = template.replace(f"{{{key}}}", str(value))
+        return self._fill_template(template)
+    
+    def generate_batch(self, profile: DataProfile) -> List[str]:
+        results = []
+        for _ in range(profile.count):
+            prompt_type = self.rng.choice(list(self.TEMPLATES.keys()))
+            results.append(self.generate_one(prompt_type))
+        return results
+
+class ResponseDataFactory:
+    """响应数据工厂"""
+    
+    RESPONSES = {
+        ResponseType.VALID: [
+            "这是一个有效的回复，包含了所需的信息。",
+            "根据您的要求，我提供了详细的分析和解答。"
+        ],
+        ResponseType.TRUNCATED: [
+            "由于字数限制，回复被截断...",
+            "未完成的回复内容"
+        ],
+        ResponseType.REJECTED: [
+            "抱歉，我无法满足这个请求。",
+            "对不起，这个问题我无法回答。"
+        ],
+        ResponseType.EMPTY: ["", "   "],
+        ResponseType.ERROR: [
+            "发生错误：服务暂时不可用。",
+            "系统错误，请稍后重试。"
+        ]
+    }
+    
+    def __init__(self, seed: int = 42):
+        self.seed = seed
+        self.rng = random.Random(seed)
+    
+    def generate_one(self, response_type: ResponseType) -> str:
+        responses = self.RESPONSES.get(response_type, [])
+        return self.rng.choice(responses) if responses else ""
+    
+    def generate_by_ratios(self, ratios: Dict[str, float]) -> Tuple[ResponseType, str]:
+        roll = self.rng.random()
+        cumulative = 0.0
+        for rt_name, ratio in ratios.items():
+            cumulative += ratio
+            if roll <= cumulative:
+                rt = ResponseType(rt_name)
+                return rt, self.generate_one(rt)
+        return ResponseType.VALID, self.generate_one(ResponseType.VALID)
+
+class DataMasker:
+    """数据脱敏器"""
+    
+    PATTERNS = {
+        "email": (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', 
+                  lambda m: m.group(0)[:3] + '***' + m.group(0)[m.group(0).find('@'):]),
+        "phone": (r'1[3-9]\d{9}', 
+                  lambda m: m.group(0)[:3] + '****' + m.group(0)[7:]),
+        "id_card": (r'\d{17}[\dXx]', 
+                    lambda m: m.group(0)[:3] + '****' + m.group(0)[14:]),
+        "api_key": (r'sk-[a-zA-Z0-9]{20,}', 
+                    lambda m: 'sk-***'),
+        "ip": (r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', 
+               lambda m: m.group(0).split('.')[0] + '.***.***.' + m.group(0).split('.')[-1])
+    }
+    
+    def mask(self, text: str) -> str:
+        result = text
+        for pattern_name, (regex, replacer) in self.PATTERNS.items():
+            result = re.sub(regex, replacer, result)
+        return result
+    
+    def has_sensitive_data(self, text: str) -> bool:
+        for pattern_name, (regex, _) in self.PATTERNS.items():
+            if re.search(regex, text):
+                return True
+        return False
+
+class DataVersionTracker:
+    """数据版本追踪器"""
+    
+    def __init__(self):
+        self.current_version = "0.0.1"
+        self.changelog: Dict[str, Dict] = {}
+        self._init_version()
+    
+    def _init_version(self):
+        self.changelog[self.current_version] = {
+            "action": "init",
+            "message": "Initial version",
+            "added": 0,
+            "modified": 0,
+            "checksum": self._compute_checksum("")
+        }
+    
+    def _compute_checksum(self, data: str) -> str:
+        return hashlib.md5(data.encode()).hexdigest()[:8]
+    
+    def _bump_version(self, level: str = "patch"):
+        parts = self.current_version.split(".")
+        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+        if level == "major":
+            major += 1
+            minor = 0
+            patch = 0
+        elif level == "minor":
+            minor += 1
+            patch = 0
+        else:
+            patch += 1
+        self.current_version = f"{major}.{minor}.{patch}"
+    
+    def add_entries(self, message: str, count: int = 1):
+        self._bump_version("patch")
+        self.changelog[self.current_version] = {
+            "action": "add_entry",
+            "message": message,
+            "added": count,
+            "modified": 0,
+            "checksum": self._compute_checksum(message)
+        }
+    
+    def update_entries(self, message: str, count: int = 1):
+        self._bump_version("patch")
+        self.changelog[self.current_version] = {
+            "action": "update_entry",
+            "message": message,
+            "added": 0,
+            "modified": count,
+            "checksum": self._compute_checksum(message)
+        }
+    
+    def get_diff(self, v1: str, v2: str) -> Dict:
+        result = {}
+        for version in sorted(self.changelog.keys()):
+            if version > v1 and version <= v2:
+                result[version] = self.changelog[version]
+        return result
+    
+    def get_version_history(self) -> List[Dict]:
+        return [
+            {"version": v, **data}
+            for v, data in sorted(self.changelog.items())
+        ]
+
+# 使用示例
+# 1. 生成 Prompt 数据
+factory = PromptDataFactory(seed=42)
+prompt = factory.generate_one("definition", topic="deep learning")
+print(f"Prompt: {prompt}")
+
+# 2. 生成批量数据
+profile = DataProfile(name="test", count=5, seed=42)
+prompts = factory.generate_batch(profile)
+print(f"Batch: {len(prompts)} prompts")
+
+# 3. 生成响应数据
+resp_factory = ResponseDataFactory(seed=42)
+response_type, response = resp_factory.generate_by_ratios(profile.response_type_ratios)
+print(f"Response type: {response_type.value}, content: {response[:20]}")
+
+# 4. 数据脱敏
+masker = DataMasker()
+test_text = "用户邮箱: test@example.com, 手机: 13812345678"
+sanitized = masker.mask(test_text)
+print(f"Original: {test_text}")
+print(f"Sanitized: {sanitized}")
+print(f"Has sensitive: {masker.has_sensitive_data(test_text)}")
+
+# 5. 版本追踪
+tracker = DataVersionTracker()
+tracker.add_entries("Added 100 SQL injection cases", 100)
+tracker.update_entries("Fixed typos", 50)
+print(f"Current version: {tracker.current_version}")
+print(f"History: {tracker.get_version_history()}")
+```
+
+---
+
+## 练习题
+
+### 练习题 1：实现数据质量评分系统
+
+**要求：**
+实现一个数据质量评分系统，评估测试数据的多维度质量。
+
+**步骤：**
+1. 定义质量维度（多样性、覆盖率、平衡性）
+2. 实现各维度评分计算
+3. 计算综合质量分数
+4. 生成质量报告和改进建议
+
+### 练习题 2：实现数据对比工具
+
+**要求：**
+实现一个数据集对比工具，支持版本间的数据差异分析。
+
+**步骤：**
+1. 实现数据条目比对算法
+2. 识别新增、删除、修改的条目
+3. 生成详细的 diff 报告
+4. 支持可视化对比
+
+### 练习题 3：实现自动化数据清洗管道
+
+**要求：**
+实现一个自动化的测试数据清洗管道。
+
+**步骤：**
+1. 设计清洗规则配置
+2. 实现数据读取和解析
+3. 执行脱敏和格式标准化
+4. 生成清洗报告和统计
+
+---

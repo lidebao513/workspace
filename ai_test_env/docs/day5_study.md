@@ -1143,6 +1143,224 @@ cd ai_test_env
 python tests/test_key_manager.py
 ```
 
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个高可用的 API Key 管理与轮换系统？
+
+**参考答案：**
+
+高可用 Key 管理系统的核心设计包括以下几个方面：
+
+1. **Key 池架构**：
+```python
+class KeyPoolManager:
+    """Key 池管理器 - 核心组件"""
+    
+    def __init__(self, strategy="round_robin"):
+        self.keys = {}  # {name: KeyEntry}
+        self.strategy = strategy
+        self.current_index = 0
+    
+    def add_key(self, api_key, name, priority=1, max_calls=100):
+        """注册新的 Key"""
+        self.keys[name] = {
+            "api_key": api_key,
+            "name": name,
+            "priority": priority,
+            "max_calls": max_calls,
+            "call_count": 0,
+            "status": KeyStatus.ACTIVE,
+            "cooldown_until": 0
+        }
+```
+
+2. **状态机转换**：
+```python
+class KeyStatus(Enum):
+    ACTIVE = "active"
+    COOLDOWN = "cooldown"
+    RETIRED = "retired"
+
+def record_failure(self, key_name):
+    """记录失败，触发状态转换"""
+    key = self.keys[key_name]
+    key["fail_count"] = key.get("fail_count", 0) + 1
+    
+    if key["fail_count"] >= 3:  # 连续失败 3 次
+        key["status"] = KeyStatus.COOLDOWN
+        key["cooldown_until"] = time.time() + 60  # 冷却 60 秒
+```
+
+3. **熔断器模式**：
+```python
+class CircuitBreaker:
+    """熔断器 - 防止雪崩效应"""
+    
+    def __init__(self, failure_threshold=3, recovery_timeout=60):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.state = "CLOSED"  # CLOSED / OPEN / HALF_OPEN
+    
+    def record_failure(self):
+        self.failure_count += 1
+        if self.failure_count >= self.failure_threshold:
+            self.state = "OPEN"
+    
+    def record_success(self):
+        self.failure_count = 0
+        self.state = "CLOSED"
+```
+
+**面试话术：**
+> "Key 管理的核心是'不把鸡蛋放在一个篮子里'。我实现了三层保护：状态机确保故障 Key 自动退场，熔断器防止持续重试雪崩，降级阶梯确保任何单点故障都不影响用户体验。上线后成功应对了 3 次限流和 1 次供应商故障，用户无感知。"
+
+---
+
+### 面试题 2：如何设计 API 降级策略？
+
+**参考答案：**
+
+API 降级策略需要考虑多级保障，确保在任何情况下都能给用户返回有意义的内容：
+
+1. **四级降级阶梯设计**：
+```python
+class DegradeManager:
+    """降级管理器 - 四级降级"""
+    
+    STEPS = [
+        DegradeStep.SWITCH_KEY,        # 第一级：换 Key
+        DegradeStep.SWITCH_MODEL,       # 第二级：换模型
+        DegradeStep.SWITCH_VENDOR,      # 第三级：换供应商
+        DegradeStep.RETURN_FALLBACK,    # 第四级：兜底
+    ]
+    
+    def advance(self, reason):
+        """执行降级"""
+        current = self.current_step()
+        if current >= len(self.STEPS):
+            return self.STEPS[-1]
+        
+        step = self.STEPS[current]
+        self.degrade_history.append({"step": step, "reason": reason})
+        self.current_step += 1
+        return step
+```
+
+2. **各层级实现**：
+```python
+def execute_degrade(self, step, request):
+    """执行降级"""
+    if step == DegradeStep.SWITCH_KEY:
+        new_key = key_pool.get_next_active_key()
+        return self.call_with_key(new_key, request)
+    
+    elif step == DegradeStep.SWITCH_MODEL:
+        return self.call_with_model("deepseek-chat", request)
+    
+    elif step == DegradeStep.SWITCH_VENDOR:
+        return self.call_vendor("qwen", request)
+    
+    elif step == DegradeStep.RETURN_FALLBACK:
+        return self.get_fallback_response()
+```
+
+3. **指数退避重试**：
+```python
+def retry_with_backoff(func, max_retries=5):
+    """指数退避重试"""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            if not is_retriable(e):
+                raise
+            
+            wait_time = min(2 ** attempt + random.uniform(0, 1), 32)
+            time.sleep(wait_time)
+```
+
+**面试话术：**
+> "降级策略的核心是'优雅退化'——不是直接报错，而是给用户一个尽可能好的体验。我设计的四级降级从换 Key 到换供应商再到兜底文案，每一步都有明确的目标和执行逻辑。上线后经历过 API 供应商故障，用户拿到的是'系统繁忙请稍后再试'而不是空白页面。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现智能 Key 负载均衡器
+
+**题目：** 实现一个智能 Key 负载均衡器 `SmartKeyBalancer`，包含：
+
+1. **动态权重调整**：根据 Key 的实时响应时间动态调整权重
+2. **健康度评分**：综合成功率、响应时间、可用性计算健康度
+3. **预测性切换**：基于历史数据预测 Key 即将耗尽，提前切换
+4. **多维度选择**：综合权重、健康度、配额剩余量选择最优 Key
+
+**数据结构设计：**
+```python
+{
+    "key_name": "主Key",
+    "health_score": 0.95,  # 健康度评分
+    "current_weight": 10,   # 当前权重
+    "quota_remaining": 5000, # 剩余配额
+    "avg_response_time_ms": 150,  # 平均响应时间
+    "success_rate": 0.99    # 成功率
+}
+```
+
+---
+
+### 练习题 2：设计多供应商容灾系统
+
+**题目：** 实现一个多供应商容灾系统 `MultiVendorFailover`，包含：
+
+1. **供应商注册**：支持注册多个 AI 供应商（DeepSeek、Qwen、Wenxin 等）
+2. **健康检查**：定时检查各供应商的可用性和响应时间
+3. **自动切换**：供应商故障时自动切换到备用供应商
+4. **成本优化**：在多供应商中选择成本最低的可用方案
+
+**供应商配置：**
+```python
+VENDORS = {
+    "deepseek": {
+        "endpoint": "https://api.deepseek.com",
+        "priority": 1,
+        "cost_per_1k_tokens": 0.00014
+    },
+    "qwen": {
+        "endpoint": "https://dashscope.aliyuncs.com",
+        "priority": 2,
+        "cost_per_1k_tokens": 0.00012
+    }
+}
+```
+
+---
+
+### 练习题 3：实现完整的限流应对系统
+
+**题目：** 实现一个完整的限流应对系统 `RateLimitHandler`，包含：
+
+1. **实时限流检测**：识别 429 状态码和 Retry-After 头
+2. **智能退避**：根据 Retry-After 和历史数据计算最优退避时间
+3. **请求队列**：将请求放入队列，在合适时机重试
+4. **批量聚合**：将多个相似请求聚合为一个请求（提示：可以用 prompt 合并）
+
+**处理流程：**
+```
+限流触发 → 解析 Retry-After → 加入重试队列
+→ 计算下次重试时间 → 执行重试 → 成功则出队
+→ 失败则根据策略决定：降级 / 继续重试 / 放弃
+```
+
+**要求：**
+- 支持配置不同的退避策略（固定、线性、指数、抖动）
+- 实现请求优先级（高优先级请求优先重试）
+- 支持超时控制和最大重试次数限制
+- 提供详细的限流统计和告警
+
 运行后你会看到：
 1. Key 池注册 3 个 Key -> 全部 ACTIVE
 2. 轮询 6 次 -> 每个 Key 均匀出现 2 次

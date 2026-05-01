@@ -1,5 +1,15 @@
 # Day 22 — 并发压测
 
+## 学习目标
+
+1. **理解并发压测指标**：掌握 P50/P95/P99 百分位延迟、RPS、QPS 的含义和计算方式
+2. **掌握 LoadTester**：熟练使用 ThreadPoolExecutor 实现并发压测
+3. **理解预热机制**：掌握 warmup 轮次排除冷启动偏差的原理
+4. **解读 LatencyReport**：能够从延迟报告中找到性能瓶颈
+5. **调优性能参数**：理解并发度与 RPS、延迟的关系
+
+---
+
 ## 一、今日目标
 
 > 学会用线程池对 AI API 做并发压力测试，计算 P50/P95/P99 延迟百分位、RPS 吞吐量、成功率和总耗时。这是性能测试的基础能力。
@@ -179,3 +189,261 @@ for concurrency in [1, 5, 10, 20]:
 | `utils/d22_load_tester.py` | 并发压测模块 | [OK] |
 | `tests/d22_test_load_tester.py` | 20 个测试 | [OK] 20/20 PASS |
 | `day22_study.md` | 本文档 | [OK] 已升级 |
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个生产级的并发压测系统？
+
+**答案：**
+
+设计生产级并发压测系统需要考虑精确度、稳定性和可扩展性：
+
+**1. 核心指标设计**
+- P50/P95/P99 百分位：排序后取对应位置值
+- RPS = 总请求数 / 总耗时
+- 成功率 = 成功请求数 / 总请求数
+
+**2. 线程安全实现**
+```python
+from threading import Lock
+
+class ThreadSafeList:
+    def __init__(self):
+        self._data = []
+        self._lock = Lock()
+    
+    def append(self, item):
+        with self._lock:
+            self._data.append(item)
+```
+
+**3. 预热机制**
+- 首次请求涉及缓存填充、连接池初始化
+- 预热 3-10 轮后 P95 可能降低 30%
+- 预热轮次不计入统计
+
+**4. 时间精度**
+- `time.perf_counter()` 用于总耗时（纳秒级）
+- `time.time_ns()` 用于单次延迟，除以 1e6 转为毫秒
+
+**5. 异常处理**
+- 单次请求失败不影响整体统计
+- 失败延迟记为 -1 或特殊值
+- 区分超时和系统错误
+
+### 面试题 2：如何根据压测结果进行性能调优？
+
+**答案：**
+
+根据压测结果进行性能调优的步骤：
+
+**1. 分析延迟分布**
+- P50 过高 → 中位数性能差
+- P95 过高 → 存在慢请求
+- P99 过高 → 长尾问题严重
+
+**2. 并发度调优**
+```
+1 并发 → 基准 RPS
+10 并发 → RPS 提升 4-6 倍
+超过瓶颈 → 延迟翻倍，RPS 下降
+```
+
+**3. 瓶颈定位**
+- CPU 瓶颈：执行时间占比高
+- I/O 瓶颈：等待时间占比高
+- 连接池瓶颈：并发数受限于连接数
+
+**4. 调优策略**
+- 增加并发度（线程池大小）
+- 优化连接池配置
+- 实施缓存策略
+- 异步化改造
+
+---
+
+## 代码示例
+
+### 并发压测器实现
+
+```python
+import time
+import threading
+from typing import List, Callable, Optional, Dict
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import statistics
+
+@dataclass
+class LatencyReport:
+    total_requests: int
+    success_count: int
+    failure_count: int
+    latencies_ms: List[float]
+    total_time_ms: float
+    
+    @property
+    def success_rate(self) -> float:
+        return self.success_count / self.total_requests if self.total_requests > 0 else 0.0
+    
+    @property
+    def rps(self) -> float:
+        return self.total_requests / (self.total_time_ms / 1000) if self.total_time_ms > 0 else 0.0
+    
+    def percentile(self, p: float) -> float:
+        if not self.latencies_ms:
+            return 0.0
+        sorted_latencies = sorted(self.latencies_ms)
+        index = int(len(sorted_latencies) * p / 100)
+        return sorted_latencies[min(index, len(sorted_latencies) - 1)]
+    
+    def display(self) -> str:
+        return f"""Latency Report:
+  Total Requests: {self.total_requests}
+  Success: {self.success_count} ({self.success_rate:.1%})
+  Failure: {self.failure_count}
+  RPS: {self.rps:.2f}
+  Latency:
+    Min: {min(self.latencies_ms):.2f}ms
+    P50: {self.percentile(50):.2f}ms
+    P95: {self.percentile(95):.2f}ms
+    P99: {self.percentile(99):.2f}ms
+    Max: {max(self.latencies_ms):.2f}ms
+    Avg: {statistics.mean(self.latencies_ms):.2f}ms"""
+
+class LoadTester:
+    """并发压测器"""
+    
+    def __init__(
+        self,
+        concurrency: int = 10,
+        warmup_rounds: int = 3
+    ):
+        self.concurrency = concurrency
+        self.warmup_rounds = warmup_rounds
+    
+    def run(
+        self,
+        target_fn: Callable,
+        total_requests: int,
+        timeout_ms: int = 30000
+    ) -> LatencyReport:
+        latencies = []
+        success_count = 0
+        failure_count = 0
+        lock = threading.Lock()
+        
+        # 预热阶段
+        for _ in range(self.warmup_rounds):
+            try:
+                target_fn()
+            except Exception:
+                pass
+        
+        # 并发压测阶段
+        start_time = time.perf_counter()
+        
+        with ThreadPoolExecutor(max_workers=self.concurrency) as executor:
+            futures = []
+            for _ in range(total_requests):
+                future = executor.submit(self._worker, target_fn, timeout_ms, latencies, lock)
+                futures.append(future)
+            
+            for future in as_completed(futures):
+                try:
+                    success, latency = future.result()
+                    with lock:
+                        if success:
+                            success_count += 1
+                            latencies.append(latency)
+                        else:
+                            failure_count += 1
+                except Exception:
+                    with lock:
+                        failure_count += 1
+        
+        end_time = time.perf_counter()
+        total_time_ms = (end_time - start_time) * 1000
+        
+        return LatencyReport(
+            total_requests=total_requests,
+            success_count=success_count,
+            failure_count=failure_count,
+            latencies_ms=latencies,
+            total_time_ms=total_time_ms
+        )
+    
+    def _worker(
+        self,
+        target_fn: Callable,
+        timeout_ms: int,
+        latencies: List,
+        lock: threading.Lock
+    ) -> tuple:
+        t0 = time.time_ns()
+        try:
+            result = target_fn()
+            latency_ms = (time.time_ns() - t0) / 1_000_000
+            return True, latency_ms
+        except Exception as e:
+            latency_ms = (time.time_ns() - t0) / 1_000_000
+            return False, latency_ms
+
+def mock_api_call() -> str:
+    """模拟 API 调用"""
+    time.sleep(0.1)  # 100ms 延迟
+    return "response"
+
+# 使用示例
+tester = LoadTester(concurrency=10, warmup_rounds=3)
+
+def slow_api():
+    time.sleep(0.2)
+    return "ok"
+
+report = tester.run(slow_api, total_requests=100)
+print(report.display())
+print(f"RPS: {report.rps:.2f}")
+print(f"P95 Latency: {report.percentile(95):.2f}ms")
+```
+
+---
+
+## 练习题
+
+### 练习题 1：实现异步压测器
+
+**要求：**
+使用 asyncio 实现异步版本的压测器。
+
+**步骤：**
+1. 使用 asyncio.create_task 创建异步任务
+2. 实现异步延迟统计
+3. 支持协程池控制并发
+4. 对比同步 vs 异步性能
+
+### 练习题 2：实现压测结果可视化
+
+**要求：**
+实现压测结果的可视化报告生成器。
+
+**步骤：**
+1. 实现延迟分布直方图
+2. 生成时间序列图
+3. 支持导出 HTML 报告
+4. 添加响应时间趋势分析
+
+### 练习题 3：实现分布式压测客户端
+
+**要求：**
+实现支持多节点协同的分布式压测客户端。
+
+**步骤：**
+1. 设计 Master-Worker 架构
+2. 实现任务分发和结果汇总
+3. 支持节点健康检测
+4. 生成汇总报告
+
+---

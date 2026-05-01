@@ -1,5 +1,15 @@
 # Day 16 — Playwright 浏览器自动化
 
+## 学习目标
+
+1. **理解 Playwright**：掌握 Playwright 在 AI 测试中的定位和用途
+2. **掌握降级模式**：理解 MockBrowser 的适配器模式设计思想
+3. **掌握检查类型**：熟练运用 7 种检查类型（LOAD/VISIBILITY/TEXT_CONTENT 等）
+4. **构建巡检系统**：能够构建 AI Chat 页面的自动化巡检流水线
+5. **集成告警机制**：实现异常检测和告警通知的完整闭环
+
+---
+
 ## 一、今日目标
 
 > 学会用 Playwright + 自定义巡检器对 AI 页面进行自动化检查，包括页面加载、元素状态、错误检测和截图留档。
@@ -170,3 +180,328 @@ manager.close()
 | `utils/browser_checker.py` | Playwright 浏览器自动化 + 巡检器 | [OK] 已创建 |
 | `tests/test_browser_checker.py` | 28 个单元测试 | [OK] 28/28 PASS |
 | `day16_study.md` | 本篇学习文档 | [OK] 已完成 |
+
+---
+
+## 面试题
+
+### 面试题 1：Playwright 在 AI 测试中有哪些应用场景？
+
+**答案：**
+
+Playwright 在 AI 测试中主要有以下应用场景：
+
+**1. 页面功能巡检**
+- 检查 AI Chat 页面的核心元素（输入框、发送按钮、消息区域）是否可见和可用
+- 验证页面加载时间和错误状态
+- 监控页面可用性和用户体验
+
+**2. UI 自动化测试**
+- 自动执行登录、发送消息、接收回复等操作
+- 验证多轮对话流程的正确性
+- 测试边界条件下的 UI 响应
+
+**3. 截图对比测试**
+- 定期截图留档，记录页面状态
+- 用于视觉回归测试，发现 UI 变化
+- 生成测试报告的视觉证据
+
+**4. 集成到 CI/CD**
+- 每日定时执行页面巡检
+- 检测到异常时自动告警
+- 与监控平台集成实现持续监控
+
+**5. 浏览器兼容性测试**
+- 在 Chromium/Firefox/WebKit 三种浏览器上测试
+- 确保 AI 产品在各浏览器上表现一致
+
+### 面试题 2：如何设计一个可靠的浏览器自动化测试框架？
+
+**答案：**
+
+设计可靠的浏览器自动化测试框架需要考虑以下方面：
+
+**1. 降级策略**
+- Playwright 未安装时使用 MockBrowser 降级
+- 保证测试在无浏览器环境也能运行
+- 对外提供一致的 API 接口
+
+**2. 错误处理机制**
+- 捕获页面加载超时、元素未找到等异常
+- 实现重试逻辑提高稳定性
+- 详细的错误日志便于问题定位
+
+**3. 页面检查类型**
+- LOAD：页面加载状态检查
+- VISIBILITY：元素可见性检查
+- TEXT_CONTENT：文本内容匹配
+- ELEMENT_COUNT：元素数量验证
+- SCREENSHOT：截图留档
+- LINK_CHECK：链接有效性检查
+- ERROR_CHECK：错误状态检测
+
+**4. 等待策略**
+- 使用自动等待机制减少不稳定性
+- 配置合理的超时时间
+- 支持显式等待特定条件
+
+**5. 报告与告警**
+- 生成结构化的检查报告
+- 支持截图附件
+- 异常时触发告警通知
+
+---
+
+## 代码示例
+
+### 浏览器管理器与页面巡检器实现
+
+```python
+from typing import List, Dict, Optional, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from datetime import datetime
+
+class CheckType(Enum):
+    LOAD = "load"
+    VISIBILITY = "visibility"
+    TEXT_CONTENT = "text_content"
+    ELEMENT_COUNT = "element_count"
+    SCREENSHOT = "screenshot"
+    LINK_CHECK = "link_check"
+    ERROR_CHECK = "error_check"
+
+class CheckStatus(Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    SKIP = "skip"
+
+@dataclass
+class PageCheckItem:
+    check_type: CheckType
+    selector: str = ""
+    expected_value: str = ""
+    threshold: int = 0
+    status: CheckStatus = CheckStatus.SKIP
+    message: str = ""
+    screenshot_path: str = ""
+
+@dataclass
+class PageCheckReport:
+    url: str
+    timestamp: str
+    checks: List[PageCheckItem] = field(default_factory=list)
+    passed_count: int = 0
+    failed_count: int = 0
+    total_count: int = 0
+    pass_rate: float = 0.0
+
+class MockBrowser:
+    """降级浏览器模拟器"""
+    
+    def __init__(self):
+        self.calls = []
+    
+    def goto(self, url: str):
+        self.calls.append(f"goto:{url}")
+        return {"url": url, "status": "loaded"}
+    
+    def query_selector(self, selector: str):
+        self.calls.append(f"query_selector:{selector}")
+        return {
+            "visible": True,
+            "text": "mock element",
+            "count": 1
+        }
+    
+    def screenshot(self, path: str = ""):
+        self.calls.append(f"screenshot:{path}")
+        return f"screenshot_saved_at_{path}"
+    
+    def evaluate(self, script: str):
+        self.calls.append(f"evaluate:{script[:20]}")
+        return {"error": None}
+
+class BrowserManager:
+    """浏览器管理器"""
+    
+    def __init__(self):
+        self.playwright_available = self._check_playwright()
+        self.browser = None
+    
+    def _check_playwright(self) -> bool:
+        try:
+            from playwright.sync_api import sync_playwright
+            return True
+        except ImportError:
+            return False
+    
+    def launch(self, headless: bool = True):
+        if self.playwright_available:
+            from playwright.sync_api import sync_playwright
+            p = sync_playwright().start()
+            browser = p.chromium.launch(headless=headless)
+            self.browser = browser
+            return browser.new_page()
+        else:
+            return MockBrowser()
+    
+    def close(self):
+        if self.browser and hasattr(self.browser, 'close'):
+            self.browser.close()
+
+class PageInspector:
+    """页面巡检引擎"""
+    
+    def __init__(self):
+        self.checks = []
+    
+    def add_check(self, check: PageCheckItem):
+        self.checks.append(check)
+    
+    def inspect(self, page) -> PageCheckReport:
+        results = []
+        passed = 0
+        failed = 0
+        
+        for check in self.checks:
+            result = self._execute_check(page, check)
+            results.append(result)
+            if result.status == CheckStatus.PASS:
+                passed += 1
+            elif result.status == CheckStatus.FAIL:
+                failed += 1
+        
+        total = len(results)
+        return PageCheckReport(
+            url=getattr(page, 'url', lambda: 'unknown')(),
+            timestamp=datetime.now().isoformat(),
+            checks=results,
+            passed_count=passed,
+            failed_count=failed,
+            total_count=total,
+            pass_rate=passed / total if total > 0 else 0.0
+        )
+    
+    def _execute_check(self, page, check: PageCheckItem) -> PageCheckItem:
+        result = PageCheckItem(
+            check_type=check.check_type,
+            selector=check.selector,
+            expected_value=check.expected_value,
+            threshold=check.threshold
+        )
+        
+        try:
+            if check.check_type == CheckType.LOAD:
+                page.goto(check.selector)
+                result.status = CheckStatus.PASS
+                result.message = "Page loaded successfully"
+            
+            elif check.check_type == CheckType.VISIBILITY:
+                element = page.query_selector(check.selector)
+                if element and element.get("visible"):
+                    result.status = CheckStatus.PASS
+                    result.message = "Element is visible"
+                else:
+                    result.status = CheckStatus.FAIL
+                    result.message = "Element not visible"
+            
+            elif check.check_type == CheckType.TEXT_CONTENT:
+                element = page.query_selector(check.selector)
+                if element and check.expected_value in element.get("text", ""):
+                    result.status = CheckStatus.PASS
+                    result.message = "Text content matches"
+                else:
+                    result.status = CheckStatus.FAIL
+                    result.message = "Text content mismatch"
+            
+            elif check.check_type == CheckType.ELEMENT_COUNT:
+                element = page.query_selector(check.selector)
+                count = element.get("count", 0) if element else 0
+                if count >= check.threshold:
+                    result.status = CheckStatus.PASS
+                    result.message = f"Element count: {count}"
+                else:
+                    result.status = CheckStatus.FAIL
+                    result.message = f"Element count {count} < {check.threshold}"
+            
+            elif check.check_type == CheckType.SCREENSHOT:
+                path = page.screenshot(check.selector or "screenshot.png")
+                result.status = CheckStatus.PASS
+                result.message = f"Screenshot saved: {path}"
+                result.screenshot_path = str(path)
+            
+            elif check.check_type == CheckType.ERROR_CHECK:
+                errors = page.evaluate("() => window.errors || []")
+                if not errors:
+                    result.status = CheckStatus.PASS
+                    result.message = "No errors detected"
+                else:
+                    result.status = CheckStatus.FAIL
+                    result.message = f"Errors found: {errors}"
+            
+        except Exception as e:
+            result.status = CheckStatus.FAIL
+            result.message = f"Check failed: {str(e)}"
+        
+        return result
+
+# 使用示例
+manager = BrowserManager()
+page = manager.launch(headless=True)
+
+inspector = PageInspector()
+inspector.add_check(PageCheckItem(CheckType.LOAD, selector="https://example.com"))
+inspector.add_check(PageCheckItem(CheckType.VISIBILITY, selector="#input-box"))
+inspector.add_check(PageCheckItem(CheckType.TEXT_CONTENT, selector="h1", expected_value="Welcome"))
+inspector.add_check(PageCheckItem(CheckType.SCREENSHOT, selector="screenshot.png"))
+inspector.add_check(PageCheckItem(CheckType.ERROR_CHECK))
+
+report = inspector.inspect(page)
+print(f"Checks: {report.passed_count}/{report.total_count} passed ({report.pass_rate:.0%})")
+
+for check in report.checks:
+    status_icon = "✓" if check.status == CheckStatus.PASS else "✗"
+    print(f"  [{status_icon}] {check.check_type.value}: {check.message}")
+
+manager.close()
+```
+
+---
+
+## 练习题
+
+### 练习题 1：实现元素对比检查器
+
+**要求：**
+扩展 PageInspector，支持元素属性对比检查。
+
+**步骤：**
+1. 添加新的检查类型 ATTRIBUTE_COMPARE
+2. 实现元素属性（disabled、placeholder、class 等）对比
+3. 支持正则表达式匹配
+4. 测试对比功能
+
+### 练习题 2：实现页面性能监控
+
+**要求：**
+实现页面性能指标收集器。
+
+**步骤：**
+1. 收集页面加载时间、TTFB 等指标
+2. 实现资源加载时间统计（JS/CSS/图片）
+3. 生成性能报告
+4. 设置性能阈值，超出时告警
+
+### 练习题 3：实现分布式巡检调度器
+
+**要求：**
+实现一个支持多节点并行巡检的调度器。
+
+**步骤：**
+1. 设计巡检任务分发机制
+2. 支持多浏览器并行执行
+3. 收集并汇总各节点巡检结果
+4. 生成统一的巡检报告
+
+---

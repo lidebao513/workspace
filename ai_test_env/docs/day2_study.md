@@ -6,6 +6,17 @@
 
 ---
 
+## 学习目标
+
+通过学习本章节，你将能够：
+1. 理解边界值分析和等价类划分方法的原理及其在 AI 测试中的应用
+2. 掌握 max_tokens、temperature、top_p 等核心参数的作用机制和测试方法
+3. 设计并执行参数边界测试用例，能够识别 API 的防护能力和异常处理机制
+4. 建立参数基线数据，为后续参数调优和质量评估提供对比依据
+5. 理解大模型"预测下一个词"的生成机制，以及参数如何影响生成过程
+
+---
+
 ## 一、今日学习目标
 
 | 目标 | 说明 |
@@ -1219,4 +1230,451 @@ def generate_param_report():
     return report_content
 ```
 
+---
+
+## 面试题
+
+### 面试题 1：如何设计 AI API 参数的边界测试方案？
+
+**参考答案：**
+
+设计 AI API 参数边界测试方案需要遵循经典测试方法论，并结合 AI 特性的特殊考量：
+
+1. **参数识别与分类**：
+   - **长度参数**：max_tokens（生成上限）
+   - **随机性参数**：temperature（软控制）、top_p（硬截断）
+   - **确定性参数**：seed（复现控制）
+   - **惩罚参数**：frequency_penalty、presence_penalty
+
+2. **边界值选取策略**：
+   ```
+   max_tokens: 0、1、10、50、100、1024、2048、8192
+   temperature: -1、0、0.1、0.7、1.0、1.5、2.0、3.0
+   top_p: -1、0、0.1、0.5、0.9、0.95、1.0、1.5
+   ```
+
+3. **等价类划分**：
+   - temperature=0 → 完全确定类
+   - temperature=0.3~0.7 → 低随机性类
+   - temperature=1.0~1.5 → 高随机性类
+   - temperature=2.0 → 极限混乱类
+
+4. **异常测试用例**：
+   - 负数参数（API 应报错或自动修正）
+   - 超范围参数（API 应有限幅或报错）
+   - 空值和 null 参数
+
+5. **组合测试**：
+   - temperature + top_p 的交互影响
+   - max_tokens + temperature 对回复长度和质量的联合影响
+
+**面试话术：**
+> "我设计边界测试时会先识别所有参数，然后根据参数特性选择边界值。比如 max_tokens 的边界是 0 和极大值，temperature 的边界是 0 和 2.0。然后用等价类划分减少用例数量，最后补充异常输入测试。实际工作中，我会建立参数基线表，记录每个参数组合下的 Token 消耗、回复质量和 finish_reason，作为后续回归对比的依据。"
+
+---
+
+### 面试题 2：在测试中如何处理 AI 回复的非确定性？
+
+**参考答案：**
+
+AI 回复的非确定性是测试面临的核心挑战，以下是系统性应对策略：
+
+1. **使用 seed 实现确定性**：
+   ```python
+   # 设置 seed 后多次请求应获得相同回复
+   response1 = client.chat_with_params(messages, temperature=0, seed=42)
+   response2 = client.chat_with_params(messages, temperature=0, seed=42)
+   # 验证两次回复是否一致
+   ```
+
+2. **多次运行取统计结果**：
+   ```python
+   # 对于无法用 seed 的场景，多次运行取平均值
+   results = []
+   for i in range(5):
+       response = client.chat_with_params(messages, temperature=1.5)
+       results.append(len(client.get_reply_text(response)))
+   
+   avg_length = sum(results) / len(results)
+   print(f"平均回复长度: {avg_length:.1f}")
+   ```
+
+3. **设定合理的断言阈值**：
+   ```python
+   # 不要断言精确相等，而是断言在合理范围内
+   reply_length = len(reply)
+   assert 50 < reply_length < 200, f"回复长度异常: {reply_length}"
+   ```
+
+4. **分类验证质量维度**：
+   - **完整性**：回复是否包含关键信息
+   - **一致性**：多次请求回复的相似度
+   - **相关性**：回复是否针对问题
+   - **安全性**：是否包含有害内容
+
+5. **建立基线与对比机制**：
+   ```python
+   # 记录基线数据
+   baseline = {
+       "temperature=0": {"avg_length": 85, "variance": 2},
+       "temperature=0.7": {"avg_length": 120, "variance": 15},
+   }
+   
+   # 当前结果与基线对比
+   deviation = abs(current_avg - baseline["avg_length"]) / baseline["avg_length"]
+   assert deviation < 0.2, "回复长度偏差过大"
+   ```
+
+**面试话术：**
+> "AI 的非确定性是测试 AI 和传统测试最大的区别。我的策略是：能用 seed 固定的场景就用 seed，比如测 temperature=0 的一致性；无法固定的场景就用统计方法，多次运行看平均值和方差；最后设定合理的断言阈值，而不是精确相等。这样既能验证 AI 的质量，又能适应它的概率本性。"
+
+---
+
+## 代码示例
+
+### 完整可运行的参数边界测试脚本
+
+```python
+"""
+参数边界测试脚本
+测试 max_tokens、temperature、top_p 等参数的边界行为
+"""
+
+import os
+import sys
+from openai import OpenAI
+from dotenv import load_dotenv
+
+class AITestClient:
+    """AI API 测试客户端"""
+    
+    def __init__(self, env_path: str = None):
+        if env_path:
+            load_dotenv(env_path)
+        else:
+            load_dotenv()
+        
+        self.api_key = os.getenv("DEEPSEEK_API_KEY")
+        self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+        self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        
+        if not self.api_key:
+            raise ValueError("DEEPSEEK_API_KEY 未配置")
+        
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+        )
+    
+    def chat_with_params(self, messages, **kwargs):
+        """
+        带自定义参数的聊天请求
+        
+        Args:
+            messages: 消息列表
+            **kwargs: temperature, max_tokens, top_p, seed 等参数
+        
+        Returns:
+            API 响应对象
+        """
+        params = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", 0.7),
+            "max_tokens": kwargs.get("max_tokens", 1024),
+            "timeout": kwargs.get("timeout", 30),
+        }
+        
+        if "seed" in kwargs:
+            params["extra_body"] = {"seed": kwargs["seed"]}
+        
+        if "top_p" in kwargs:
+            params["top_p"] = kwargs["top_p"]
+        
+        try:
+            response = self.client.chat.completions.create(**params)
+            return response
+        except Exception as e:
+            raise RuntimeError(f"API 请求失败: {e}")
+    
+    def get_reply_text(self, response) -> str:
+        """提取回复文本"""
+        if response.choices and len(response.choices) > 0:
+            return response.choices[0].message.content or ""
+        return ""
+    
+    def get_token_usage(self, response) -> dict:
+        """提取 Token 使用情况"""
+        if not response.usage:
+            return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        return {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+    
+    def get_finish_reason(self, response) -> str:
+        """提取结束原因"""
+        if response.choices and len(response.choices) > 0:
+            return response.choices[0].finish_reason
+        return "unknown"
+
+
+def test_max_tokens_boundary(client: AITestClient):
+    """max_tokens 边界测试"""
+    print("=" * 60)
+    print("测试 1: max_tokens 边界测试")
+    print("=" * 60)
+    
+    messages = [{"role": "user", "content": "请详细介绍一下 Python 编程语言"}]
+    test_cases = [
+        (1, "极短截断"),
+        (10, "短截断"),
+        (50, "中等长度"),
+        (100, "较长回复"),
+        (1024, "完整回复"),
+    ]
+    
+    for max_tokens, desc in test_cases:
+        try:
+            response = client.chat_with_params(messages, max_tokens=max_tokens)
+            reply = client.get_reply_text(response)
+            usage = client.get_token_usage(response)
+            finish = client.get_finish_reason(response)
+            
+            print(f"\nmax_tokens={max_tokens:4d} ({desc}):")
+            print(f"  回复长度: {len(reply)} 字符")
+            print(f"  Completion Tokens: {usage['completion_tokens']}")
+            print(f"  finish_reason: {finish}")
+        except Exception as e:
+            print(f"\nmax_tokens={max_tokens}: 错误 - {e}")
+
+
+def test_temperature_consistency(client: AITestClient):
+    """temperature 一致性测试"""
+    print("\n" + "=" * 60)
+    print("测试 2: temperature 一致性测试")
+    print("=" * 60)
+    
+    messages = [{"role": "user", "content": "请说出 5 个编程语言的名称，用逗号分隔"}]
+    
+    print("\n【temperature=0 测试】")
+    replies = []
+    for i in range(3):
+        response = client.chat_with_params(messages, temperature=0)
+        reply = client.get_reply_text(response)
+        replies.append(reply)
+        print(f"  第 {i+1} 次: {reply[:50]}...")
+    
+    unique_replies = len(set(replies))
+    print(f"  3 次回复的独特版本数: {unique_replies}")
+    print(f"  结果: {'✅ 完全一致' if unique_replies == 1 else '⚠️ 存在差异'}")
+    
+    print("\n【temperature=1.5 测试】")
+    replies = []
+    for i in range(3):
+        response = client.chat_with_params(messages, temperature=1.5)
+        reply = client.get_reply_text(response)
+        replies.append(reply)
+        print(f"  第 {i+1} 次: {reply[:50]}...")
+    
+    unique_replies = len(set(replies))
+    print(f"  3 次回复的独特版本数: {unique_replies}")
+    print(f"  结果: {'✅ 存在随机性（符合预期）' if unique_replies > 1 else '⚠️ 意外一致'}")
+
+
+def test_top_p_effect(client: AITestClient):
+    """top_p 参数效果测试"""
+    print("\n" + "=" * 60)
+    print("测试 3: top_p 参数效果测试")
+    print("=" * 60)
+    
+    messages = [{"role": "user", "content": "说一个形容高兴的成语"}]
+    
+    top_ps = [
+        (0.1, "极度确定"),
+        (0.5, "中等确定"),
+        (0.9, "较多样"),
+        (1.0, "完全随机"),
+    ]
+    
+    for top_p, desc in top_ps:
+        response = client.chat_with_params(
+            messages,
+            temperature=0.7,
+            top_p=top_p
+        )
+        reply = client.get_reply_text(response)
+        print(f"\ntop_p={top_p} ({desc}):")
+        print(f"  回复: {reply[:50]}...")
+
+
+def test_invalid_params(client: AITestClient):
+    """异常参数测试"""
+    print("\n" + "=" * 60)
+    print("测试 4: 异常参数处理测试")
+    print("=" * 60)
+    
+    messages = [{"role": "user", "content": "你好"}]
+    
+    print("\n【测试负数 temperature】")
+    try:
+        response = client.chat_with_params(messages, temperature=-1)
+        print(f"  ⚠️  未报错，API 自动处理")
+        print(f"  回复: {client.get_reply_text(response)[:30]}...")
+    except Exception as e:
+        print(f"  ✅ 被正确拦截: {type(e).__name__}")
+    
+    print("\n【测试超范围 temperature】")
+    try:
+        response = client.chat_with_params(messages, temperature=3.0)
+        print(f"  ⚠️  未报错，API 可能已自动限幅")
+    except Exception as e:
+        print(f"  ✅ 被正确拦截: {type(e).__name__}")
+    
+    print("\n【测试负数 max_tokens】")
+    try:
+        response = client.chat_with_params(messages, max_tokens=-1)
+        print(f"  ⚠️  未报错，API 自动处理")
+    except Exception as e:
+        print(f"  ✅ 被正确拦截: {type(e).__name__}")
+
+
+def test_param_combination(client: AITestClient):
+    """参数组合测试"""
+    print("\n" + "=" * 60)
+    print("测试 5: 参数组合测试矩阵")
+    print("=" * 60)
+    
+    messages = [{"role": "user", "content": "用一句话描述春天"}]
+    
+    combinations = [
+        (0.0, 50, "确定短回复"),
+        (0.0, 200, "确定长回复"),
+        (0.7, 50, "平衡短回复"),
+        (0.7, 200, "平衡长回复"),
+        (1.5, 50, "创意短回复"),
+        (1.5, 200, "创意长回复"),
+    ]
+    
+    print(f"\n{'temperature':^12} | {'max_tokens':^10} | {'描述':^14} | {'回复长度':^8} | {'Tokens':^8}")
+    print("-" * 70)
+    
+    for temp, max_t, desc in combinations:
+        response = client.chat_with_params(messages, temperature=temp, max_tokens=max_t)
+        reply = client.get_reply_text(response)
+        usage = client.get_token_usage(response)
+        print(f"{temp:^12.1f} | {max_t:^10d} | {desc:^14} | {len(reply):^8d} | {usage['completion_tokens']:^8d}")
+
+
+def main():
+    """主函数"""
+    print("🚀 AI API 参数边界测试")
+    print("=" * 60)
+    
+    try:
+        client = AITestClient()
+        print("✅ 客户端初始化成功\n")
+    except ValueError as e:
+        print(f"❌ 初始化失败: {e}")
+        return
+    
+    test_max_tokens_boundary(client)
+    test_temperature_consistency(client)
+    test_top_p_effect(client)
+    test_invalid_params(client)
+    test_param_combination(client)
+    
+    print("\n" + "=" * 60)
+    print("🎉 所有测试完成！")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
 ```
+
+**运行方法：**
+1. 确保已安装依赖：`pip install openai python-dotenv`
+2. 配置 `.env` 文件中的 API Key
+3. 运行脚本：`python tests/test_params.py`
+
+---
+
+## 练习题
+
+### 练习题 1：扩展 API 客户端参数方法
+
+**题目：** 为 `AITestClient` 类添加以下新方法：
+
+1. `chat_with_seed()` - 使用固定 seed 的聊天方法，确保回复可复现
+2. `compare_params()` - 对比两组不同参数的回复差异
+3. `measure_latency()` - 测量不同参数下的响应时间
+
+**要求：**
+- 每个方法需要有详细的文档字符串
+- 返回结构化的测试结果
+- 包含异常处理
+
+---
+
+### 练习题 2：实现参数基线管理系统
+
+**题目：** 创建一个参数基线管理类 `ParamBaselineManager`，实现以下功能：
+
+1. 保存参数测试基线到 JSON 文件
+2. 加载已有基线进行对比
+3. 检测参数回归（当前结果与基线偏差过大时告警）
+4. 生成参数测试报告
+
+**数据结构设计：**
+```python
+{
+    "model": "deepseek-chat",
+    "timestamp": "2026-04-30T10:00:00",
+    "baselines": {
+        "temperature=0": {
+            "avg_reply_length": 85.2,
+            "avg_tokens": 88.5,
+            "variance": 5.3,
+            "sample_count": 10
+        }
+    }
+}
+```
+
+---
+
+### 练习题 3：设计完整的参数测试框架
+
+**题目：** 使用 pytest 和 pytest-html 设计一个完整的参数测试框架：
+
+1. 使用 `@pytest.mark.parametrize` 实现参数化测试
+2. 使用 `@pytest.fixture` 实现测试夹具（client fixture、baseline fixture）
+3. 生成 HTML 测试报告
+4. 实现测试用例的分类标记（smoke、regression、full）
+
+**测试矩阵设计：**
+```python
+@pytest.mark.parametrize("temperature,max_tokens", [
+    (0.0, 50),
+    (0.0, 200),
+    (0.7, 50),
+    (0.7, 200),
+    (1.5, 50),
+    (1.5, 200),
+])
+@pytest.mark.regression
+def test_param_combination(client, temperature, max_tokens):
+    """参数组合测试"""
+    pass
+```
+
+**要求：**
+- 测试报告需要包含每个参数组合的详细结果
+- 实现测试用例的过滤功能（只跑 smoke、只跑 regression 等）
+- 添加测试执行时间统计
+
+---
+
+> 准备好了就开始 Day 3？Day 3 将学习**提示词工程测试**，设计有效的 Prompt 模板并测试其效果。

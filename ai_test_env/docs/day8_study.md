@@ -396,3 +396,253 @@ content_filter 截断：
 cd ai_test_env
 python tests/test_truncation.py
 ```
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个生产级别的截断检测与 max_tokens 优化系统？
+
+**参考答案：**
+
+生产级截断检测系统需要实时监控和智能调优：
+
+1. **实时截断监控**：
+```python
+class TruncationMonitor:
+    """截断实时监控器"""
+    
+    def __init__(self, alert_threshold=0.05):
+        self.alert_threshold = alert_threshold  # 5% 截断率告警阈值
+        self.truncation_history = []
+    
+    def record(self, finish_reason, max_tokens, actual_tokens):
+        """记录每次请求的截断情况"""
+        is_truncated = finish_reason == "length" or finish_reason == "content_filter"
+        self.truncation_history.append({
+            "finish_reason": finish_reason,
+            "max_tokens": max_tokens,
+            "actual_tokens": actual_tokens,
+            "is_truncated": is_truncated,
+            "timestamp": datetime.now()
+        })
+    
+    def get_truncation_rate(self, time_window_minutes=60):
+        """计算时间窗口内的截断率"""
+        cutoff = datetime.now() - timedelta(minutes=time_window_minutes)
+        recent = [r for r in self.truncation_history if r["timestamp"] > cutoff]
+        if not recent:
+            return 0.0
+        return sum(1 for r in recent if r["is_truncated"]) / len(recent)
+```
+
+2. **智能 max_tokens 推荐**：
+```python
+def recommend_max_tokens(historical_data):
+    """基于历史数据推荐 max_tokens"""
+    # 找出所有"完整回复"的最大长度
+    complete_responses = [
+        r["actual_tokens"] for r in historical_data
+        if r["finish_reason"] == "stop" and r["actual_tokens"] < r["max_tokens"]
+    ]
+    
+    if not complete_responses:
+        return None  # 没有完整回复，无法推荐
+    
+    max_complete = max(complete_responses)
+    recommended = int(max_complete * 1.2)  # 留 20% 余量
+    
+    return {
+        "max_complete_length": max_complete,
+        "recommended_max_tokens": recommended,
+        "buffer_ratio": 0.2,
+        "reason": f"最大完整回复 {max_complete} Token，推荐 × 1.2 = {recommended}"
+    }
+```
+
+3. **成本效益分析**：
+```python
+def cost_benefit_analysis(current_config, recommended_config, daily_requests):
+    """分析调优的成本效益"""
+    current_cost_per_request = current_config["max_tokens"] * 0.28 / 1_000_000
+    new_cost_per_request = recommended_config["max_tokens"] * 0.28 / 1_000_000
+    
+    daily_cost_increase = (new_cost_per_request - current_cost_per_request) * daily_requests
+    
+    current_truncation_rate = current_config["truncation_rate"]
+    new_truncation_rate = recommended_config.get("expected_truncation_rate", 0.02)
+    truncation_improvement = current_truncation_rate - new_truncation_rate
+    
+    return {
+        "daily_cost_increase_yuan": round(daily_cost_increase, 4),
+        "truncation_improvement": f"{truncation_improvement:.1%}",
+        "roi": "高" if truncation_improvement > 0.1 else "中" if truncation_improvement > 0.05 else "低"
+    }
+```
+
+**面试话术：**
+> "截断优化不是一次性的，而是持续监控和调整的过程。我的系统每秒记录截断率，每天生成报告，一旦超过阈值就自动告警。max_tokens 的推荐基于实际完整回复的最大值 × 1.2，既保证不截断，又避免浪费。"
+
+---
+
+### 面试题 2：如何平衡截断率优化和成本控制？
+
+**参考答案：**
+
+截断率和成本是一对需要平衡的指标：
+
+1. **分级阈值设计**：
+```python
+TRUNCATION_TIERS = {
+    "critical": {"threshold": 0.02, "action": "immediate_adjust"},
+    "warning": {"threshold": 0.05, "action": "review_and_plan"},
+    "acceptable": {"threshold": 0.10, "action": "monitor"},
+    "over_provisioned": {"threshold": 0.30, "action": "reduce_max_tokens"}
+}
+
+def get_adjustment_recommendation(truncation_rate, current_max_tokens):
+    """根据截断率和当前配置给出调整建议"""
+    tier = TRUNCATION_TIERS.get(
+        next((k for k, v in TRUNCATION_TIERS.items() 
+             if truncation_rate <= v["threshold"]), "over_provisioned")
+    )
+    
+    if tier["action"] == "immediate_adjust":
+        new_max = int(current_max_tokens * 1.5)
+        return {"action": "increase", "new_max_tokens": new_max, "reason": "截断率过高"}
+    elif tier["action"] == "reduce_max_tokens":
+        new_max = int(current_max_tokens * 0.8)
+        return {"action": "decrease", "new_max_tokens": new_max, "reason": "max_tokens 过高"}
+    
+    return {"action": "maintain", "reason": "当前配置合理"}
+```
+
+2. **场景化 max_tokens 配置**：
+```python
+SCENE_MAX_TOKENS = {
+    "short_answer": {"max_tokens": 256, "expected_truncation": 0.01},
+    "normal_conversation": {"max_tokens": 1024, "expected_truncation": 0.03},
+    "long_content": {"max_tokens": 2048, "expected_truncation": 0.05},
+    "document_generation": {"max_tokens": 4096, "expected_truncation": 0.10}
+}
+```
+
+**面试话术：**
+> "截断率和成本不是对立关系，而是要找平衡点。我的策略是：先设一个较高的 max_tokens 建立基线，观察截断率；然后逐步降低，直到截断率接近 5% 的可接受阈值。这样既能控制成本，又能保证用户体验。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现智能 max_tokens 调优器
+
+**题目：** 实现一个智能 max_tokens 调优器 `SmartMaxTokensTuner`，包含：
+
+1. **自适应调整**：根据截断率自动调整 max_tokens
+2. **多场景支持**：不同业务场景使用不同配置
+3. **成本控制**：在保证截断率的前提下最小化 Token 消耗
+4. **预测性调优**：基于历史趋势预测未来的 max_tokens 需求
+
+**调优算法设计：**
+```python
+class SmartMaxTokensTuner:
+    def __init__(self):
+        self.scene_configs = {}
+        self.adjustment_history = []
+    
+    def tune(self, scene, current_truncation_rate, current_max_tokens):
+        """智能调优主方法"""
+        config = self.scene_configs.get(scene, {"target_truncation": 0.05})
+        target = config["target_truncation"]
+        
+        if current_truncation_rate > target:
+            # 截断率过高，增加 max_tokens
+            adjustment_factor = 1.2 + (current_truncation_rate - target)
+            new_max = int(current_max_tokens * min(adjustment_factor, 2.0))
+        elif current_truncation_rate < target * 0.5:
+            # 截断率过低，可以适当降低 max_tokens 节省成本
+            adjustment_factor = 0.9
+            new_max = int(current_max_tokens * adjustment_factor)
+        else:
+            new_max = current_max_tokens
+        
+        return TuningResult(
+            current_max=current_max_tokens,
+            new_max=new_max,
+            adjustment_factor=new_max / current_max_tokens,
+            reason=self._generate_reason(current_truncation_rate, target)
+        )
+```
+
+---
+
+### 练习题 2：实现截断根因分析系统
+
+**题目：** 实现一个截断根因分析系统 `TruncationRootCauseAnalyzer`，包含：
+
+1. **数据收集**：收集截断案例的详细上下文
+2. **模式识别**：识别截断发生的常见模式
+3. **原因分类**：将截断归类为不同原因
+4. **建议生成**：根据原因给出具体的改进建议
+
+**原因分类和对应建议：**
+```python
+TRUNCATION_CAUSES = {
+    "insufficient_max_tokens": {
+        "indicator": "finish_reason=length, actual_tokens close to max_tokens",
+        "suggestion": "增加 max_tokens 20-50%",
+        "priority": "high"
+    },
+    "prompt_too_long": {
+        "indicator": "finish_reason=length, high prompt_tokens ratio",
+        "suggestion": "简化 prompt 或分段处理",
+        "priority": "high"
+    },
+    "content_filter_triggered": {
+        "indicator": "finish_reason=content_filter",
+        "suggestion": "检查 prompt 是否有违规内容",
+        "priority": "critical"
+    },
+    "model_capability": {
+        "indicator": "finish_reason=stop but response incomplete",
+        "suggestion": "考虑更换更强大的模型",
+        "priority": "medium"
+    }
+}
+```
+
+---
+
+### 练习题 3：实现多档 max_tokens 性能对比测试
+
+**题目：** 实现一个 max_tokens 性能对比测试系统 `MaxTokensComparisonTester`，包含：
+
+1. **多档位测试**：测试 256/512/1024/2048/4096 各档位的截断率
+2. **成本分析**：计算各档位的 Token 消耗和费用
+3. **拐点发现**：找出"截断率快速下降"和"成本快速上升"的拐点
+4. **推荐生成**：基于测试结果生成最优档位推荐
+
+**测试报告格式：**
+```python
+{
+    "test_prompt": "详细解释Python的装饰器",
+    "tested_tiers": [
+        {"max_tokens": 256, "truncation_rate": 0.45, "cost_per_call": 0.00007},
+        {"max_tokens": 512, "truncation_rate": 0.15, "cost_per_call": 0.00014},
+        {"max_tokens": 1024, "truncation_rate": 0.02, "cost_per_call": 0.00029},
+        {"max_tokens": 2048, "truncation_rate": 0.0, "cost_per_call": 0.00057}
+    ],
+    "inflection_point": {"max_tokens": 1024, "reason": "截断率降至2%以下"},
+    "recommendation": {
+        "max_tokens": 1024,
+        "expected_truncation": "2%",
+        "cost_increase_vs_256": "314%"
+    }
+}
+```
+
+**要求：**
+- 实现统计显著性检验
+- 支持自定义测试场景
+- 生成可视化对比图表
+- 实现定时自动测试和告警

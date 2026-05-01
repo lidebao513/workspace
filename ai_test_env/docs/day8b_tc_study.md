@@ -6,6 +6,16 @@
 
 ---
 
+## 学习目标
+
+1. **理解核心概念**：掌握 Tool Calling（函数调用）的工作原理，理解其如何解决大模型的知识截止日期和实时数据问题
+2. **掌握测试层次**：熟练运用工具选择、参数正确性、多工具协作三个层次的测试方法
+3. **识别错误模式**：能够识别并分类 8 种常见的 Tool Calling 错误模式
+4. **实现测试模块**：能独立实现工具调用解析器和验证逻辑
+5. **设计测试用例**：掌握单一工具、多工具、合理拒绝等场景的测试用例设计
+
+---
+
 ## 一、今日学习目标
 
 | 目标 | 说明 |
@@ -574,6 +584,228 @@ Test 11: 批量执行
 - [ ] 知道"合理拒绝"在测试中的重要性
 - [ ] 能解释链式调用和并行调用的测试区别
 - [ ] 能回答面试 Q1-Q5 中的任意三个
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个生产级的 Tool Calling 测试框架？
+
+**答案：**
+
+设计生产级 Tool Calling 测试框架需要考虑以下几个核心维度：
+
+**1. 测试覆盖层设计**
+- **工具选择层**：验证模型能否从多个工具中选择正确的工具
+- **参数完整性层**：验证必填参数是否全部提供
+- **参数准确性层**：验证参数值是否正确（包括同义表达映射）
+- **安全边界层**：验证模型在敏感请求下是否合理拒绝
+
+**2. 多格式解析支持**
+- 支持 JSON 格式（OpenAI 原生格式）
+- 支持函数文本格式（如 `func(param=val)`）
+- 支持 Markdown 格式（Claude 等模型输出）
+
+**3. 评分体系**
+- 采用 0-1.0 连续值评分，支持部分正确场景
+- 错误分级：errors（严重错误，如选错工具）和 warnings（轻微问题，如参数值偏差）
+- 门禁规则：通过率 >= 95%，安全用例 100% 通过
+
+**4. 回归测试集成**
+- 维护测试用例库，支持版本管理
+- A/B 对比新旧版本的工具调用质量
+- 自动化门禁检查，质量下降超过阈值时阻止上线
+
+**5. 监控与告警**
+- 实时监控工具调用成功率
+- 异常模式检测（如突然增多的错误调用）
+- 定期生成质量报告
+
+### 面试题 2：如何处理工具调用中的参数模糊匹配问题？
+
+**答案：**
+
+参数模糊匹配是 Tool Calling 测试中的核心挑战，需要从测试和优化两个维度解决：
+
+**测试策略：**
+
+1. **同义表达测试**：
+   - 同一参数的不同表达方式作为输入，验证是否映射到正确参数值
+   - 示例："NYC / New York City / 纽约" → 都应映射到 city="New York"
+
+2. **信息缺失测试**：
+   - 测试模型在参数缺失时的应对策略
+   - 示例："查天气"（缺城市）→ 验证默认行为（报错/默认城市/反问）
+
+3. **格式验证测试**：
+   - 验证参数格式是否符合要求
+   - 示例：repo 参数是否符合 "user/repo" 格式
+
+**优化策略：**
+
+1. **增强工具描述**：
+   - 在工具定义中提供更多示例
+   - 使用更具体的参数说明
+
+2. **添加 Few-shot 示例**：
+   - 在 System Prompt 中加入工具调用示例
+   - 覆盖常见的同义表达场景
+
+3. **参数映射层**：
+   - 建立参数值映射表（同义词表）
+   - 在调用工具前进行参数标准化处理
+
+4. **上下文理解增强**：
+   - 结合对话历史推断缺失参数
+   - 支持上下文默认值填充
+
+---
+
+## 代码示例
+
+### 工具调用验证器实现
+
+```python
+from typing import List, Dict, Any, Tuple
+from enum import Enum
+
+class ToolCallStatus(Enum):
+    CORRECT = "correct"           # 完全正确
+    WRONG_TOOL = "wrong_tool"     # 选错工具
+    MISSING_PARAM = "missing_param"  # 缺少必要参数
+    WRONG_PARAM = "wrong_param"   # 参数值错误
+    EXTRA_CALL = "extra_call"     # 多余调用
+    REFUSED = "refused"           # 合理拒绝
+    MALFORMED = "malformed"       # 格式错误
+
+class ToolCallValidator:
+    """工具调用验证器"""
+    
+    def validate(self, expected_calls: List[Dict], actual_calls: List[Dict]) -> Tuple[ToolCallStatus, float]:
+        """
+        验证实际工具调用是否符合预期
+        
+        Args:
+            expected_calls: 期望的工具调用列表
+            actual_calls: 实际的工具调用列表
+            
+        Returns:
+            (状态, 分数)
+        """
+        errors = []
+        warnings = []
+        
+        # 检查应该调用但没调用
+        if not actual_calls and expected_calls:
+            return ToolCallStatus.MISSING_PARAM, 0.0
+        
+        # 检查应该不调但调了（合理拒绝场景）
+        if actual_calls and not expected_calls:
+            return ToolCallStatus.EXTRA_CALL, 0.0
+        
+        # 逐一验证期望调用
+        for expected in expected_calls:
+            found = False
+            for actual in actual_calls:
+                if actual.get("tool") == expected.get("tool"):
+                    found = True
+                    # 验证参数
+                    expected_params = expected.get("params", {})
+                    actual_params = actual.get("params", {})
+                    
+                    # 检查必填参数
+                    for param_name, expected_value in expected_params.items():
+                        if param_name not in actual_params:
+                            errors.append(f"missing_param: {param_name}")
+                        elif actual_params[param_name] != expected_value:
+                            warnings.append(f"wrong_param: {param_name}")
+                    break
+            
+            if not found:
+                errors.append(f"wrong_tool: {expected.get('tool')}")
+        
+        # 计算分数
+        score = self._calculate_score(errors, warnings, len(expected_calls))
+        
+        # 确定状态
+        if not errors and not warnings:
+            status = ToolCallStatus.CORRECT
+        elif "wrong_tool" in [e.split(":")[0] for e in errors]:
+            status = ToolCallStatus.WRONG_TOOL
+        elif "missing_param" in errors:
+            status = ToolCallStatus.MISSING_PARAM
+        elif warnings:
+            status = ToolCallStatus.WRONG_PARAM
+        else:
+            status = ToolCallStatus.CORRECT
+        
+        return status, score
+    
+    def _calculate_score(self, errors: List[str], warnings: List[str], expected_count: int) -> float:
+        """计算分数（0-1.0）"""
+        if expected_count == 0:
+            return 1.0 if not errors else 0.0
+        
+        penalty = len(errors) * 0.3 + len(warnings) * 0.1
+        return max(0.0, round(1.0 - min(penalty, 1.0), 2))
+
+# 使用示例
+validator = ToolCallValidator()
+
+# 测试场景 1：完全正确
+expected = [{"tool": "get_weather", "params": {"city": "北京"}}]
+actual = [{"tool": "get_weather", "params": {"city": "北京"}}]
+status, score = validator.validate(expected, actual)
+print(f"场景1: {status.value}, 分数: {score}")  # correct, 1.0
+
+# 测试场景 2：参数值错误
+expected = [{"tool": "get_weather", "params": {"city": "上海"}}]
+actual = [{"tool": "get_weather", "params": {"city": "深圳"}}]
+status, score = validator.validate(expected, actual)
+print(f"场景2: {status.value}, 分数: {score}")  # wrong_param, 0.9
+
+# 测试场景 3：选错工具
+expected = [{"tool": "get_weather", "params": {"city": "北京"}}]
+actual = [{"tool": "search_web", "params": {"query": "北京天气"}}]
+status, score = validator.validate(expected, actual)
+print(f"场景3: {status.value}, 分数: {score}")  # wrong_tool, 0.0
+```
+
+---
+
+## 练习题
+
+### 练习题 1：实现多工具链式调用测试
+
+**要求：**
+实现一个链式调用测试场景：用户问"北京天气怎么样，给我推荐适合的景点"，期望模型先调用 `get_weather("北京")`，然后根据天气结果调用 `recommend_places("北京", weather=...)`。
+
+**步骤：**
+1. 定义两个工具：`get_weather` 和 `recommend_places`
+2. 设计链式调用的测试用例
+3. 实现分步验证逻辑
+4. 编写测试代码验证链式调用的正确性
+
+### 练习题 2：实现参数同义表达映射
+
+**要求：**
+实现一个参数映射模块，支持同义表达的自动转换。
+
+**步骤：**
+1. 定义参数映射表（如城市名、日期格式等）
+2. 实现映射函数，将用户输入转换为标准参数值
+3. 测试不同表达方式是否能正确映射
+
+### 练习题 3：实现安全拒绝测试用例集
+
+**要求：**
+构建一组安全拒绝测试用例，验证模型在敏感请求下的行为。
+
+**步骤：**
+1. 定义禁止调用的工具列表
+2. 设计各种安全红线场景（如批量发送优惠券、删除数据等）
+3. 实现安全拒绝验证逻辑
+4. 编写测试用例验证所有安全场景
 
 ---
 

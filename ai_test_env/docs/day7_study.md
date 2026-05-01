@@ -578,8 +578,240 @@ cd ai_test_env
 python tests/test_consistency.py
 ```
 
-运行后你会看到：
-1. 6 个测试逐一执行
-2. 每个测试输出详细的评分和等级
-3. 温度曲线验证了"分数随 temperature 上升而下降"
-4. `compare_consistency` 给出最佳温度推荐
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个完整的一致性测试体系？
+
+**参考答案：**
+
+完整的一致性测试体系需要从多个维度进行设计：
+
+1. **多温度梯度测试**：
+```python
+def temperature_consistency_curve(client, prompt, temperatures, runs=5):
+    """温度-一致性曲线测试"""
+    results = {}
+    
+    for temp in temperatures:
+        responses = []
+        for _ in range(runs):
+            response = client.chat_with_params(
+                prompt=prompt,
+                temperature=temp,
+                max_tokens=500
+            )
+            responses.append(client.get_reply_text(response))
+        
+        score = calculate_consistency_score(responses)
+        results[temp] = {
+            "score": score,
+            "unique_count": len(set(responses)),
+            "avg_length": sum(len(r) for r in responses) / len(responses)
+        }
+    
+    return results
+```
+
+2. **场景化温度推荐**：
+```python
+TEMPERATURE_RECOMMENDATIONS = {
+    "financial_inquiry": {"range": [0.0, 0.3], "reason": "余额必须一致"},
+    "legal_consultation": {"range": [0.0, 0.2], "reason": "条款不能有歧义"},
+    "technical_support": {"range": [0.3, 0.5], "reason": "核心信息一致，表达可变"},
+    "creative_writing": {"range": [1.0, 1.5], "reason": "追求多样性"},
+    "chatbot": {"range": [0.7, 1.0], "reason": "新鲜感优先"}
+}
+```
+
+3. **统计显著性检验**：
+```python
+from scipy import stats
+
+def check_statistical_significance(baseline_scores, new_scores):
+    """检验新旧评分差异是否显著"""
+    t_stat, p_value = stats.ttest_ind(baseline_scores, new_scores)
+    return {
+        "significant": p_value < 0.05,
+        "p_value": p_value,
+        "conclusion": "差异显著" if p_value < 0.05 else "差异不显著"
+    }
+```
+
+**面试话术：**
+> "一致性测试不是单点测试，而是一个体系。我会先建立温度-一致性曲线，找到场景的最优温度；然后用统计方法验证样本量是否足够；最后设计场景化的温度推荐表。生产环境中，每天监控一致性分数的分布趋势，一旦异常立刻告警。"
+
+---
+
+### 面试题 2：如何处理"创意场景需要不一致"的需求？
+
+**参考答案：**
+
+创意场景和事实场景的一异性测试策略完全不同：
+
+1. **场景分类处理**：
+```python
+class ConsistencyTestStrategy:
+    """一致性测试策略选择器"""
+    
+    STRATEGIES = {
+        "factual": {
+            "expected_consistency": "high",
+            "test_method": "exact_match_or_embedding_similarity",
+            "threshold": 0.95
+        },
+        "creative": {
+            "expected_consistency": "low",
+            "test_method": "diversity_metrics",
+            "threshold": 0.3  # 越低说明越多样
+        },
+        "hybrid": {
+            "expected_consistency": "medium",
+            "test_method": "combined_score",
+            "threshold": 0.6
+        }
+    }
+```
+
+2. **多样性指标设计**：
+```python
+def calculate_diversity_score(responses):
+    """计算创意场景的多样性评分"""
+    if not responses:
+        return 0.0
+    
+    unique_ratio = len(set(responses)) / len(responses)
+    length_variation = np.std([len(r) for r in responses]) / np.mean([len(r) for r in responses])
+    
+    diversity_score = unique_ratio * 0.6 + min(length_variation, 1.0) * 0.4
+    return round(diversity_score, 3)
+```
+
+3. **混合评分方法**：
+```python
+def calculate_hybrid_consistency_score(responses, is_creative=False):
+    """混合场景的一致性评分"""
+    base_score = calculate_basic_consistency_score(responses)
+    
+    if is_creative:
+        diversity_bonus = calculate_diversity_score(responses) * 0.3
+        return base_score * 0.7 + diversity_bonus
+    else:
+        return base_score
+```
+
+**面试话术：**
+> "不是所有场景都需要高一致性。创意场景反而需要低一致性——每次回复都不一样才是好的。我设计了场景化的评分策略：事实类场景用相似度评分，创意类场景用多样性评分。这样既能满足质量要求，又不会误杀创意回复。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现自适应温度推荐系统
+
+**题目：** 实现一个自适应温度推荐系统 `AdaptiveTemperatureRecommender`，包含：
+
+1. **历史数据分析**：分析不同场景的历史回复一致性
+2. **动态阈值调整**：根据用户反馈调整一致性阈值
+3. **多维度推荐**：综合考虑场景、用户偏好、成本限制
+4. **A/B 测试支持**：支持不同温度的在线对比实验
+
+**推荐算法设计：**
+```python
+class AdaptiveTemperatureRecommender:
+    def __init__(self):
+        self.scene_profiles = {
+            "factual": {"target_consistency": 0.95, "weight_facts": 0.4},
+            "creative": {"target_diversity": 0.7, "weight_creativity": 0.4}
+        }
+    
+    def recommend(self, scene, user_preferences=None, cost_budget=None):
+        """返回推荐温度和理由"""
+        profile = self.scene_profiles.get(scene, {})
+        target = profile.get("target_consistency", 0.8)
+        
+        recommended_temp = self._find_optimal_temperature(
+            scene=scene,
+            target_score=target
+        )
+        
+        return Recommendation(
+            temperature=recommended_temp,
+            confidence=0.85,
+            reasoning=f"基于{scene}场景的目标一致性{target}推荐"
+        )
+```
+
+---
+
+### 练习题 2：实现一致性异常检测系统
+
+**题目：** 实现一个一致性异常检测系统 `ConsistencyAnomalyDetector`，包含：
+
+1. **实时监控**：监控生产环境回复的一致性分数
+2. **异常检测算法**：使用统计方法检测一致性异常
+3. **根因分析**：分析一致性下降的可能原因
+4. **自动告警**：触发阈值后自动通知
+
+**异常检测逻辑：**
+```python
+class ConsistencyAnomalyDetector:
+    def __init__(self, window_size=100, z_threshold=2.5):
+        self.window_size = window_size
+        self.z_threshold = z_threshold
+        self.history = []
+    
+    def detect(self, new_score):
+        """检测一致性是否异常"""
+        self.history.append(new_score)
+        if len(self.history) < self.window_size:
+            return {"anomaly": False, "reason": "数据不足"}
+        
+        recent = self.history[-self.window_size:]
+        mean = np.mean(recent)
+        std = np.std(recent)
+        
+        z_score = (new_score - mean) / std if std > 0 else 0
+        
+        return {
+            "anomaly": abs(z_score) > self.z_threshold,
+            "z_score": z_score,
+            "deviation": new_score - mean,
+            "severity": "high" if abs(z_score) > 3 else "medium" if abs(z_score) > 2 else "low"
+        }
+```
+
+---
+
+### 练习题 3：实现跨模型一致性对比测试
+
+**题目：** 实现一个跨模型一致性对比系统 `CrossModelConsistencyTester`，包含：
+
+1. **多模型支持**：支持测试多个不同模型的一致性
+2. **对比分析**：对比不同模型在不同场景的一致性表现
+3. **可视化报告**：生成直观的对比图表
+4. **最优选择**：根据场景推荐最适合的模型
+
+**对比报告格式：**
+```python
+{
+    "test_prompt": "什么是人工智能？",
+    "models_tested": ["deepseek-chat", "qwen-plus", "gpt-4o-mini"],
+    "results": {
+        "deepseek-chat": {"consistency": 0.82, "avg_length": 150, "stability": "high"},
+        "qwen-plus": {"consistency": 0.75, "avg_length": 180, "stability": "medium"},
+        "gpt-4o-mini": {"consistency": 0.88, "avg_length": 120, "stability": "very_high"}
+    },
+    "recommendation": {
+        "model": "gpt-4o-mini",
+        "reason": "在factual场景下表现最佳"
+    }
+}
+```
+
+**要求：**
+- 实现统计显著性检验
+- 支持自定义测试场景
+- 生成 HTML 可视化报告
+- 实现结果缓存避免重复测试

@@ -443,4 +443,309 @@ cd C:\Users\69037\.openclaw\workspace\ai_test_env
 python -m tests.test_llm_judge
 ```
 
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个生产级的 LLM-as-Judge 评估系统？
+
+**参考答案：**
+
+生产级 LLM-as-Judge 系统需要解决评判一致性、偏差校正和降级处理：
+
+1. **多评委集成**：
+```python
+class MultiJudgeEvaluator:
+    """多评委集成评估器"""
+    
+    def __init__(self):
+        self.judges = [
+            LLMJudge(model="gpt-4"),
+            LLMJudge(model="claude-opus"),
+            LLMJudge(model="deepseek-chat")
+        ]
+        self.weights = [0.4, 0.35, 0.25]
+    
+    def evaluate(self, prompt, response):
+        """多评委独立评分后加权平均"""
+        scores = []
+        for judge in self.judges:
+            score = judge.evaluate(prompt, response)
+            scores.append(score)
+        
+        weighted_score = sum(s * w for s, w in zip(scores, self.weights))
+        return {
+            "weighted_score": weighted_score,
+            "individual_scores": scores,
+            "agreement_rate": self._calculate_agreement(scores)
+        }
+    
+    def _calculate_agreement(self, scores):
+        """计算评委间一致性"""
+        if not scores:
+            return 1.0
+        variance = np.var(scores)
+        return max(0, 1 - variance)
+```
+
+2. **偏差校正机制**：
+```python
+class BiasCorrector:
+    """评判偏差校正器"""
+    
+    def __init__(self):
+        self.human_baseline = []  # 人工标定的标准答案
+        self.model_predictions = []
+    
+    def calibrate(self, judge_model):
+        """校准评委模型"""
+        # 对比人工标定和评委评分
+        corrections = []
+        for human_score, model_score in zip(self.human_baseline, self.model_predictions):
+            correction = human_score - model_score
+            corrections.append(correction)
+        
+        # 计算系统性偏差
+        avg_correction = np.mean(corrections)
+        return lambda raw_score: raw_score + avg_correction
+```
+
+3. **降级兜底策略**：
+```python
+def safe_evaluate(judge, prompt, response):
+    """安全的评估，带降级兜底"""
+    try:
+        # 优先尝试完整评估
+        return judge.evaluate(prompt, response)
+    except JSONDecodeError:
+        # 降级 1：尝试宽松解析
+        result = judge._relaxed_parse(response)
+        if result:
+            result["fallback"] = True
+            return result
+        # 降级 2：返回默认值
+        return DEFAULT_SCORE.copy()
+```
+
+**面试话术：**
+> "LLM-as-Judge 不是简单调一个模型打分就完了。我设计了多评委集成降低单点偏差、偏差校正机制校准系统性误差、降级兜底策略确保评估不中断。这套体系在生产环境中稳定运行，每天评估 5000+ 条回复，评委间一致性维持在 85% 以上。"
+
+---
+
+### 面试题 2：如何解决 LLM-as-Judge 的 self-evaluation bias 问题？
+
+**参考答案：**
+
+Self-evaluation bias 是 LLM-as-Judge 的核心挑战，需要多种方法组合应对：
+
+1. **Cross-evaluation 避免自评**：
+```python
+class CrossEvaluator:
+    """交叉评估 - 用其他模型评判"""
+    
+    def __init__(self):
+        self.models = ["gpt-4", "claude-opus", "qwen-plus"]
+    
+    def evaluate(self, prompt, target_response, judge_model):
+        """用指定模型评判"""
+        if judge_model == target_model:
+            raise ValueError("不能用自己的模型评判自己")
+        # 交叉评判逻辑
+```
+
+2. **对抗性测试检测偏差**：
+```python
+def detect_self_preference(judge, test_pairs):
+    """检测评委是否对自己的输出有偏好"""
+    results = []
+    for prompt, response_a, response_b in test_pairs:
+        # A 是被测模型输出，B 是其他模型输出
+        score_a = judge.evaluate(prompt, response_a)
+        score_b = judge.evaluate(prompt, response_b)
+        results.append({"a_better": score_a > score_b})
+    
+    # 如果被测模型输出普遍得分更高，说明有自评偏差
+    self_preference_rate = sum(1 for r in results if r["a_better"]) / len(results)
+    has_bias = abs(self_preference_rate - 0.5) > 0.15
+    
+    return {"has_bias": has_bias, "self_preference_rate": self_preference_rate}
+```
+
+3. **引入人工标定集**：
+```python
+CALIBRATION_SET = [
+    {"prompt": "...", "response": "...", "expected_score": 0.8},
+    {"prompt": "...", "response": "...", "expected_score": 0.3},
+]
+
+def validate_judge(judge):
+    """验证评委准确性"""
+    errors = []
+    for item in CALIBRATION_SET:
+        predicted = judge.evaluate(item["prompt"], item["response"])
+        error = abs(predicted - item["expected_score"])
+        errors.append(error)
+    
+    avg_error = np.mean(errors)
+    return {"accurate": avg_error < 0.15, "avg_error": avg_error}
+```
+
+**面试话术：**
+> "Self-evaluation bias 确实是 LLM-as-Judge 的阿喀琉斯之踵。我的解法是：禁止用自己的模型评判自己、引入对抗性测试检测偏好、用人工标定集持续校准。实践下来，这套机制把评判偏差从 15% 降到了 5% 以内。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现多维度 LLM 质量评估系统
+
+**题目：** 扩展 LLMJudge 类，实现一个更全面的多维度评估系统 `EnhancedLLMJudge`，包含：
+
+1. **维度扩展**：添加更多评估维度（逻辑性、专业性、友好性等）
+2. **动态权重**：根据场景自动调整各维度权重
+3. **解释生成**：为每个评分维度生成文字解释
+4. **改进建议**：基于评分结果给出具体的改进建议
+
+**评估维度扩展：**
+```python
+ENHANCED_DIMENSIONS = {
+    "accuracy": {"weight": 0.20, "description": "回答的事实准确性"},
+    "relevance": {"weight": 0.15, "description": "回答与问题的相关性"},
+    "completeness": {"weight": 0.15, "description": "回答的完整程度"},
+    "conciseness": {"weight": 0.10, "description": "回答的简洁程度"},
+    "logicality": {"weight": 0.10, "description": "回答的逻辑性"},
+    "professionalism": {"weight": 0.10, "description": "回答的专业性"},
+    "friendliness": {"weight": 0.10, "description": "回答的友好程度"},
+    "safety": {"weight": 0.10, "description": "回答的安全性"}
+}
+
+class EnhancedLLMJudge:
+    def evaluate(self, prompt, response):
+        """返回多维度评估结果和改进建议"""
+        dimension_scores = {}
+        for dim, config in ENHANCED_DIMENSIONS.items():
+            score = self._evaluate_dimension(prompt, response, dim)
+            dimension_scores[dim] = {
+                "score": score,
+                "weight": config["weight"],
+                "description": config["description"]
+            }
+        
+        weighted_total = sum(
+            s["score"] * s["weight"] for s in dimension_scores.values()
+        )
+        
+        return EnhancedResult(
+            dimensions=dimension_scores,
+            total_score=weighted_total,
+            suggestions=self._generate_suggestions(dimension_scores)
+        )
+```
+
+---
+
+### 练习题 2：实现 A/B 对比测试框架
+
+**题目：** 实现一个 A/B 对比测试框架 `ABTestFramework`，包含：
+
+1. **统计显著性检验**：确保对比结果统计上显著
+2. **置信区间计算**：给出评分差异的置信区间
+3. **多维度对比**：对比各维度的具体差异
+4. **自动结论生成**：基于对比结果自动生成结论
+
+**统计检验设计：**
+```python
+from scipy import stats
+
+class ABTestFramework:
+    def __init__(self, significance_level=0.05):
+        self.significance_level = significance_level
+    
+    def compare(self, model_a_results, model_b_results):
+        """A/B 对比检验"""
+        # 独立 t 检验
+        t_stat, p_value = stats.ttest_ind(
+            [r["total_score"] for r in model_a_results],
+            [r["total_score"] for r in model_b_results]
+        )
+        
+        # 计算效应量
+        pooled_std = np.sqrt((
+            np.var([r["total_score"] for r in model_a_results]) +
+            np.var([r["total_score"] for r in model_b_results])
+        ) / 2)
+        effect_size = (np.mean([r["total_score"] for r in model_a_results]) -
+                      np.mean([r["total_score"] for r in model_b_results])) / pooled_std
+        
+        return ComparisonResult(
+            significant=p_value < self.significance_level,
+            p_value=p_value,
+            effect_size=effect_size,
+            winner="A" if np.mean([r["total_score"] for r in model_a_results]) > 
+                          np.mean([r["total_score"] for r in model_b_results]) else "B",
+            confidence_interval=self._compute_ci(model_a_results, model_b_results)
+        )
+```
+
+---
+
+### 练习题 3：实现 Schema 验证与自动修复系统
+
+**题目：** 实现一个 Schema 验证与自动修复系统 `SchemaValidatorWithRepair`，包含：
+
+1. **多层级 Schema 验证**：支持嵌套对象的深度验证
+2. **类型自动转换**：尝试自动修复类型错误
+3. **默认值填充**：自动填充缺失的默认值
+4. **验证报告生成**：生成详细的验证和修复报告
+
+**验证与修复逻辑：**
+```python
+class SchemaValidatorWithRepair:
+    def __init__(self, schema):
+        self.schema = schema
+        self.repairs = []
+    
+    def validate_and_repair(self, data):
+        """验证并修复数据"""
+        original = copy.deepcopy(data)
+        errors = []
+        warnings = []
+        
+        # 字段存在性检查
+        for field, field_schema in self.schema.get("properties", {}).items():
+            if field not in data:
+                if field_schema.get("required"):
+                    errors.append(f"缺少必需字段: {field}")
+                elif "default" in field_schema:
+                    data[field] = field_schema["default"]
+                    self.repairs.append(f"填充默认值: {field}={field_schema['default']}")
+        
+        # 类型检查和转换
+        for field, value in data.items():
+            if field in self.schema.get("properties", {}):
+                expected_type = self.schema["properties"][field].get("type")
+                if not self._check_type(value, expected_type):
+                    converted = self._try_convert(value, expected_type)
+                    if converted is not None:
+                        data[field] = converted
+                        self.repairs.append(f"类型转换: {field}")
+                    else:
+                        errors.append(f"字段 {field} 类型错误")
+        
+        return ValidationResult(
+            valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings,
+            repairs=self.repairs,
+            original=original,
+            repaired=data
+        )
+```
+
+**要求：**
+- 支持 JSON Schema 规范子集
+- 实现常用的类型转换（string→int, string→float等）
+- 支持自定义验证规则
+- 生成可视化验证报告
+
 期望输出中 6 个测试全部显示 [OK]。

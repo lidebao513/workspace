@@ -4,31 +4,31 @@
 > 总测试：627 passed, 19 skipped, 0 warnings
 > 最后更新：2026-04-30
 
----
+***
 
 ## 符号说明
 
-| 标记 | 含义 |
-|:----|:-----|
-| 📖 | 学习文档（`day{day}_study.md`，在 `docs/`） |
-| 🔧 | 工具模块（`utils/d{day}_{name}.py`） |
-| 🧪 | 测试文件（`tests/d{day}_test_{name}.py`） |
-| 🏗️ | 项目级文件 |
-| ✅ | 已完成 |
+| 标记  | 含义                                  |
+| :-- | :---------------------------------- |
+| 📖  | 学习文档（`day{day}_study.md`，在 `docs/`） |
+| 🔧  | 工具模块（`utils/d{day}_{name}.py`）      |
+| 🧪  | 测试文件（`tests/d{day}_test_{name}.py`） |
+| 🏗️ | 项目级文件                               |
+| ✅   | 已完成                                 |
 
 ## 优先级说明
 
-| 标签 | 含义 | 建议 |
-|:----|:-----|:-----|
-| 🟢 **看看就行** | 看一遍、跑一下测试即可 | 5-10 分钟 |
-| 🟡 **手敲一遍** | 抄核心逻辑到白纸再检查 | 15-20 分钟 |
-| 🔴 **脱稿能讲** | 必须能讲 5 分钟 | 先看 10 分钟 → 闭眼讲一遍 |
+| 标签          | 含义          | 建议               |
+| :---------- | :---------- | :--------------- |
+| 🟢 **看看就行** | 看一遍、跑一下测试即可 | 5-10 分钟          |
+| 🟡 **手敲一遍** | 抄核心逻辑到白纸再检查 | 15-20 分钟         |
+| 🔴 **脱稿能讲** | 必须能讲 5 分钟   | 先看 10 分钟 → 闭眼讲一遍 |
 
----
+***
 
 ## 第 1 周 — 基础建设
 
-### D1 — API 客户端 🟡 手敲
+### D1 — API 客户端 🟡 手敲  --done
 
 - 📖 `day1_study.md`（26KB）
 - 🔧 `utils/d1_api_client.py` — `AITestClient`：请求/响应/超时/错误处理
@@ -66,7 +66,7 @@
 - **手敲重点：** 3 种调度策略 + `get_next_key()` 逻辑
 - **面试话术：** "多个 API Key 通过 KeyPoolManager 轮换，支持自动降级..."
 
----
+***
 
 ## 第 2 周 — 质量评估
 
@@ -90,7 +90,7 @@
 ### D8 — 截断 & TC 测试（双模块）🟢 看看
 
 - 📖 `day8_study.md`（12KB）+ `day8b_tc_study.md`（21KB）
-- 🔧 `utils/d8_truncation_analyzer.py` — 截断检测（finish_reason/字符模式）
+- 🔧 `utils/d8_truncation_analyzer.py` — 截断检测（finish\_reason/字符模式）
 - 🔧 `utils/d8_tc_tester.py` — Tool Calling 测试
 - 🧪 `tests/d8_test_truncation.py` + `tests/d8_test_tc.py`
 - **说明：** 截断检测有用但简单；TC 测试需要环境，先了解
@@ -120,7 +120,7 @@
 - 📖 `day9_study.md`（14KB）
 - 🔧 `utils/d9_llm_judge.py` — `LLMJudge` + `JudgeResult`：多维度自动评分
 - 🧪 `tests/d9_test_llm_judge.py`
-- **手敲重点：** `JudgeResult` 的字段（scores/weighted_score/comment）
+- **手敲重点：** `JudgeResult` 的字段（scores/weighted\_score/comment）
 - **脱稿练习：** "用 LLM 评 LLM 的核心是多维加权：relevance 0.4 + completeness 0.3 + fluency 0.3..."
 - **面试必问：** "你叫 AI 评 AI，能信吗？" → 回答：趋势监控 + 人工复审异常值
 
@@ -131,7 +131,7 @@
 - 🔧 `utils/d10_pipeline_assessment.py` — 评分流水线
 - 🧪 `tests/d10_test_schema.py` + `tests/d10_test_pipeline_assessment.py`
 
----
+***
 
 ## 第 3 周 — 安全与高级测试
 
@@ -169,7 +169,7 @@
 - 🔧 `utils/d15_e2e_tester.py` — 端到端链路测试
 - 🧪 `tests/d15_test_e2e.py`
 
----
+***
 
 ## 第 4 周 — 自动化
 
@@ -206,7 +206,7 @@
 - 🔧 `utils/d20_data_manager.py` — 模板填充/批量生成/脱敏
 - 🧪 `tests/d20_test_data_manager.py`
 
----
+***
 
 ## 第 5 周 — 性能与工程化
 
@@ -245,10 +245,10 @@
 ### D25 — 错误体系 🟢 看看
 
 - 📖 `day25_study.md`（7KB）
-- 🔧 `utils/d25_error_system.py` — 分级异常 + to_dict 序列化
+- 🔧 `utils/d25_error_system.py` — 分级异常 + to\_dict 序列化
 - 🧪 `tests/d25_test_error_system.py`
 
----
+***
 
 ## 第 6 周 — 实战项目
 
@@ -287,7 +287,7 @@
 - 🔧 `utils/d30_comprehensive.py` — 端到端自检/全验证
 - 🧪 `tests/d30_test_comprehensive.py`
 
----
+***
 
 ## Phase 1 — API 实战
 
@@ -311,7 +311,7 @@
 - 🔧 `utils/d33_integration.py` — 三合一
 - 🧪 `tests/d33_test_integration.py`（7 tests）
 
----
+***
 
 ## Phase 2 — 面试准备
 
@@ -332,7 +332,7 @@
 - 📖 `docs/INTERVIEW_STAR.md`（3KB）
 - **建议：** 写自己版本的 STAR 故事
 
----
+***
 
 ## Phase 3 — 项目文档
 
@@ -345,27 +345,27 @@
 - 🏗️ `docs/ARCHITECTURE.md`（5KB）
 - 🧪 `tests/d37_project_docs_test.py`（7 tests）
 
----
+***
 
 ## 学习路线建议
 
-### 🎯 面试冲刺路线（~7 天）
+### 🎯 面试冲刺路线（\~7 天）
 
 按优先级排序：
 
-| 排序 | Day | 优先级 | 时间 |
-|:----|:----|:-------|:-----|
-| 1 | D6 | 🔴 脱稿 | 15min |
-| 2 | D9 | 🔴 脱稿 | 15min |
-| 3 | D23-D24 | 🔴 脱稿 | 20min |
-| 4 | D27 | 🔴 脱稿 | 15min |
-| 5 | D5 D7 D12 | 🟡 手敲 | 30min |
-| 6 | D22 D26 | 🟡 手敲 | 20min |
-| 7 | D34-D36 | 🔴 话术 | 30min |
+| 排序 | Day       | 优先级   | 时间    |
+| :- | :-------- | :---- | :---- |
+| 1  | D6        | 🔴 脱稿 | 15min |
+| 2  | D9        | 🔴 脱稿 | 15min |
+| 3  | D23-D24   | 🔴 脱稿 | 20min |
+| 4  | D27       | 🔴 脱稿 | 15min |
+| 5  | D5 D7 D12 | 🟡 手敲 | 30min |
+| 6  | D22 D26   | 🟡 手敲 | 20min |
+| 7  | D34-D36   | 🔴 话术 | 30min |
 
 总时：约 7 天 × 每天 1-2 小时
 
-### 🧠 深度掌握路线（~14 天）
+### 🧠 深度掌握路线（\~14 天）
 
 从上往下按日顺序：
 
@@ -374,6 +374,6 @@
 3. 🟡 D26 → 🔴 D27 → 🟢 其他
 4. D34-D36 面试准备
 
----
+***
 
 ## 附录：文件汇总 （略，见 docs/ 目录）

@@ -858,7 +858,212 @@ cd ai_test_env
 python tests/test_response_baseline.py
 ```
 
-运行后你会看到：
-1. 9 个字段逐一验证报告（PASS / FAIL / WARN）
-2. 4 种场景的 Token 一致性验证（P+C=T 是否成立）
-3. 首次请求时间
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个完整的 API 响应验证体系？
+
+**参考答案：**
+
+一个完整的 API 响应验证体系需要从多个维度进行验证，确保返回的数据既正确又安全：
+
+1. **结构完整性验证**：
+```python
+class ResponseValidator:
+    """API 响应验证器"""
+    
+    REQUIRED_FIELDS = ["id", "object", "created", "model", "choices", "usage"]
+    
+    def validate_structure(self, response):
+        """验证响应结构完整性"""
+        for field in self.REQUIRED_FIELDS:
+            if not hasattr(response, field):
+                return {"valid": False, "error": f"缺少必需字段: {field}"}
+        return {"valid": True}
+```
+
+2. **数据一致性验证**：
+```python
+def validate_usage_consistency(usage):
+    """验证 Token 数据一致性"""
+    expected_total = usage.prompt_tokens + usage.completion_tokens
+    if usage.total_tokens != expected_total:
+        return {"valid": False, "error": "Token 数据不一致"}
+    return {"valid": True}
+```
+
+3. **finish_reason 分布监控**：
+```python
+def monitor_finish_reason_distribution(responses):
+    """监控 finish_reason 分布是否正常"""
+    distribution = {}
+    for r in responses:
+        reason = r.choices[0].finish_reason
+        distribution[reason] = distribution.get(reason, 0) + 1
+    
+    if distribution.get("length", 0) / len(responses) > 0.01:
+        return {"alert": True, "message": "length 比例超过 1%，需要调大 max_tokens"}
+    return {"alert": False}
+```
+
+4. **边界情况处理**：
+```python
+def validate_edge_cases(response):
+    """验证边界情况"""
+    results = []
+    
+    # 空回复
+    if not response.choices[0].message.content:
+        results.append({"case": "empty_content", "status": "WARN"})
+    
+    # finish_reason 为 null
+    if response.choices[0].finish_reason is None:
+        results.append({"case": "null_finish_reason", "status": "FAIL"})
+    
+    return results
+```
+
+**面试话术：**
+> "我设计的响应验证体系分三层：结构验证确保字段不缺，数据验证确保值对，分布验证确保行为正常。这套体系在每次 CI 运行时自动跑，任何 API 变更都会被发现。Day 4 测试时就发现了 DeepSeek 的 id 格式变化——从 chatcmpl-xxx 变成了 UUID。这种'在用户感知前发现问题'的能力是测试自动化的核心价值。"
+
+---
+
+### 面试题 2：如何建立和维护 AI API 的性能基线？
+
+**参考答案：**
+
+建立和维护性能基线是 AI 测试中的重要环节，需要系统化的方法和工具支持：
+
+1. **基线数据设计**：
+```python
+class PerformanceBaseline:
+    """性能基线管理器"""
+    
+    def __init__(self):
+        self.baselines = {
+            "token_consumption": {},  # Token 消耗基线
+            "response_time": {},       # 响应时间基线
+            "quality_metrics": {}      # 质量指标基线
+        }
+    
+    def record_token_baseline(self, scenario, prompt, usage):
+        """记录 Token 消耗基线"""
+        self.baselines["token_consumption"][scenario] = {
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "prompt": prompt[:50]  # 记录 prompt 前 50 字符
+        }
+```
+
+2. **基线对比检测**：
+```python
+def detect_baseline_drift(self, current_metrics):
+    """检测基线偏移"""
+    drifts = []
+    for scenario, current in current_metrics.items():
+        baseline = self.baselines["token_consumption"].get(scenario)
+        if baseline:
+            deviation = (current["total_tokens"] - baseline["total_tokens"]) / baseline["total_tokens"]
+            if abs(deviation) > 0.2:  # 偏差超过 20%
+                drifts.append({
+                    "scenario": scenario,
+                    "deviation": f"{deviation:.1%}",
+                    "baseline": baseline["total_tokens"],
+                    "current": current["total_tokens"]
+                })
+    return drifts
+```
+
+3. **响应时间基线**：
+```python
+def record_response_time(self, scenario, first_request_time, avg_request_time):
+    """记录响应时间基线"""
+    self.baselines["response_time"][scenario] = {
+        "first_request_ms": first_request_time,
+        "avg_request_ms": avg_request_time,
+        "recorded_at": datetime.now().isoformat()
+    }
+```
+
+**面试话术：**
+> "性能基线是 AI 测试的'体检报告'。我建立了 Token 消耗、响应时间、finish_reason 分布三套基线。每次模型升级后跑一遍对比，如果 Token 消耗突然涨了 30%，或者 length 比例突然升高，说明新版本有问题。这种'数据驱动'的方法比'感觉'准确得多。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现增强版响应验证器
+
+**题目：** 扩展 `ResponseValidator` 类，添加以下功能：
+
+1. 添加 JSON Schema 验证功能，对比 API 返回与预期结构
+2. 添加历史版本追踪，记录每次验证的结果和时间
+3. 添加自定义验证规则支持，允许用户添加业务特定的验证逻辑
+4. 实现验证结果缓存，避免重复验证相同响应
+
+**数据结构设计：**
+```python
+{
+    "response_id": "chatcmpl-xxx",
+    "validated_at": "2026-04-30T10:00:00",
+    "validations": {
+        "structure": {"status": "PASS", "fields": {...}},
+        "usage": {"status": "PASS", "consistency": True},
+        "finish_reason": {"status": "PASS", "value": "stop"}
+    },
+    "overall_status": "PASS"
+}
+```
+
+---
+
+### 练习题 2：设计 Token 消耗监控系统
+
+**题目：** 实现一个 Token 消耗监控模块 `TokenMonitor`，包含：
+
+1. **实时监控**：记录每次 API 调用的 Token 消耗
+2. **趋势分析**：分析 Token 消耗趋势，检测异常增长
+3. **预算控制**：设置日/周/月 Token 预算，超出自动告警
+4. **成本估算**：根据 Token 消耗估算费用
+
+**告警规则：**
+```python
+ALERT_RULES = {
+    "daily_budget_exceeded": {"threshold": 10000, "period": "day"},
+    "token_drift": {"deviation": 0.3, "comparison": "baseline"},
+    "completion_ratio_anomaly": {"ratio": 0.7}  # 输出/输入超过 70%
+}
+```
+
+---
+
+### 练习题 3：实现响应时间性能测试框架
+
+**题目：** 实现一个响应时间性能测试框架 `PerformanceTester`，包含：
+
+1. **冷启动测试**：测量首次请求的响应时间
+2. **并发测试**：测量多并发请求的平均响应时间
+3. **压力测试**：逐步增加 QPS，记录性能拐点
+4. **稳定性测试**：长时间运行，检测性能衰减
+
+**测试报告格式：**
+```python
+{
+    "test_type": "load_test",
+    "timestamp": "2026-04-30T10:00:00",
+    "results": {
+        "avg_response_time_ms": 150,
+        "p50_ms": 120,
+        "p95_ms": 300,
+        "p99_ms": 500,
+        "error_rate": 0.01
+    }
+}
+```
+
+**要求：**
+- 实现可视化图表生成
+- 支持导出 JSON/HTML 格式报告
+- 实现性能回归检测

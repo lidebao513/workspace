@@ -1,5 +1,15 @@
 # Day 14 — Prompt 回归测试体系
 
+## 学习目标
+
+1. **理解回归测试**：掌握回归测试在 Prompt 版本管理中的作用和重要性
+2. **设计用例库**：学会设计回归用例库（增删改查 + 分类 + 标签 + 版本）
+3. **掌握规则判定**：熟练运用关键词、长度、黑白名单等规则判定方法
+4. **实现 A/B 对比**：学会进行版本对比和门禁检查
+5. **建立测试流程**：构建完整的回归测试自动化流程
+
+---
+
 ## 一、今日目标
 
 > 学会建立 Prompt 回归测试体系——包括用例库管理、规则判定、A/B 对比和门禁检查。
@@ -386,3 +396,340 @@ tests/test_regression.py::TestGatingCheck::test_gating_pass PASSED
 
 29 passed in 0.04s
 ```
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个完整的 Prompt 回归测试体系？
+
+**答案：**
+
+设计 Prompt 回归测试体系需要以下核心组件：
+
+**1. 用例库管理**
+- **CRUD 操作**：支持添加、查询、删除、更新测试用例
+- **分类系统**：按功能正确性、安全边界、回复质量、边界输入、业务场景分类
+- **标签系统**：支持灵活打标签（如 critical、math、security）
+- **版本管理**：记录用例创建时间和版本号
+- **导入导出**：支持 JSON 格式的批量导入导出
+
+**2. 规则判定体系**
+- **期望关键词**：回复必须包含的关键词列表
+- **禁止关键词**：回复不能包含的关键词列表
+- **长度限制**：最小/最大回复长度
+- **匹配策略**：默认使用包含匹配（`in` 操作符），支持精确匹配选项
+
+**3. A/B 对比机制**
+- **对比矩阵**：
+  - A 通过 → B 通过：不变
+  - A 通过 → B 不通过：退化（regression）
+  - A 不通过 → B 通过：改善（improvement）
+  - A 不通过 → B 不通过：不变
+- **关键指标**：退化数、改善数、通过率变化
+
+**4. 门禁检查**
+- **通过率阈值**：>= 95% 为通过
+- **安全用例要求**：关键安全用例必须 100% 通过
+- **退化阈值**：退化数超过阈值时阻止上线
+
+**5. 自动化流程**
+- **触发条件**：每次 System Prompt 修改或模型版本更新时自动运行
+- **报告生成**：自动生成测试报告，包含通过率、退化数、改善数
+- **告警通知**：测试失败时发送告警
+
+### 面试题 2：如何处理回归测试中的误判问题？
+
+**答案：**
+
+回归测试中的误判主要有两种：假阳性（正常回复被判定为失败）和假阴性（问题回复被判定为通过）。处理策略如下：
+
+**假阳性处理：**
+1. **调整匹配策略**：从精确匹配改为包含匹配
+2. **扩展关键词**：增加同义词和变体形式
+3. **模糊匹配**：使用语义相似度匹配代替精确字符串匹配
+4. **动态阈值**：根据历史数据调整判定阈值
+
+**假阴性处理：**
+1. **增强规则**：添加更多禁止关键词和模式
+2. **多层判定**：结合关键词匹配、长度检查、语义分析
+3. **LLM 辅助**：对不确定的情况调用 LLM 进行二次判断
+4. **人工审核**：定期抽样审核，发现漏判用例
+
+**预防措施：**
+1. **用例评审**：新增用例需要经过评审才能入库
+2. **版本控制**：用例库的变更需要记录和审批
+3. **定期维护**：定期清理过时用例，更新关键词
+4. **反馈闭环**：将误判案例反馈到用例库更新流程
+
+---
+
+## 代码示例
+
+### Prompt 回归测试器实现
+
+```python
+from typing import List, Dict, Optional, Callable
+from dataclasses import dataclass
+from enum import Enum
+from datetime import datetime
+
+class CaseCategory(Enum):
+    FUNCTIONAL = "functional"    # 功能正确性
+    SECURITY = "security"        # 安全边界
+    QUALITY = "quality"          # 回复质量
+    EDGE_CASE = "edge_case"      # 边界输入
+    BUSINESS = "business"        # 业务场景
+
+@dataclass
+class RegressionCase:
+    id: str = ""
+    category: CaseCategory = CaseCategory.FUNCTIONAL
+    prompt: str = ""
+    expected_behavior: str = ""
+    expected_keywords: List[str] = None
+    forbidden_keywords: List[str] = None
+    min_length: int = 1
+    max_length: int = 500
+    tags: List[str] = None
+    version: str = "1.0"
+    created_at: str = ""
+    
+    def __post_init__(self):
+        if self.expected_keywords is None:
+            self.expected_keywords = []
+        if self.forbidden_keywords is None:
+            self.forbidden_keywords = []
+        if self.tags is None:
+            self.tags = []
+        if not self.created_at:
+            self.created_at = datetime.now().isoformat()
+
+class RegressionLibrary:
+    """回归测试用例库"""
+    
+    def __init__(self):
+        self._cases: Dict[str, RegressionCase] = {}
+        self._index = 0
+    
+    def add(self, case: RegressionCase) -> str:
+        """添加用例，自动生成 ID"""
+        if not case.id:
+            self._index += 1
+            case.id = f"REG-{self._index:03d}"
+        if not case.created_at:
+            case.created_at = datetime.now().isoformat()
+        self._cases[case.id] = case
+        return case.id
+    
+    def get(self, case_id: str) -> Optional[RegressionCase]:
+        """获取用例"""
+        return self._cases.get(case_id)
+    
+    def remove(self, case_id: str) -> bool:
+        """删除用例"""
+        if case_id in self._cases:
+            del self._cases[case_id]
+            return True
+        return False
+    
+    def update(self, case_id: str, updates: Dict) -> bool:
+        """更新用例"""
+        if case_id in self._cases:
+            case = self._cases[case_id]
+            for key, value in updates.items():
+                if hasattr(case, key):
+                    setattr(case, key, value)
+            return True
+        return False
+    
+    def filter(self, category: CaseCategory = None, tag: str = None, version: str = None) -> List[RegressionCase]:
+        """按条件过滤用例"""
+        results = list(self._cases.values())
+        
+        if category:
+            results = [c for c in results if c.category == category]
+        if tag:
+            results = [c for c in results if tag in c.tags]
+        if version:
+            results = [c for c in results if c.version == version]
+        
+        return results
+    
+    def export_json(self) -> str:
+        """导出为 JSON"""
+        import json
+        return json.dumps([{k: v if not isinstance(v, Enum) else v.value 
+                          for k, v in vars(case).items()} 
+                         for case in self._cases.values()], 
+                         ensure_ascii=False, indent=2)
+    
+    def import_json(self, json_str: str) -> int:
+        """从 JSON 导入"""
+        import json
+        data = json.loads(json_str)
+        count = 0
+        for item in data:
+            case = RegressionCase(
+                id=item.get("id", ""),
+                category=CaseCategory(item.get("category", "functional")),
+                prompt=item.get("prompt", ""),
+                expected_keywords=item.get("expected_keywords", []),
+                forbidden_keywords=item.get("forbidden_keywords", []),
+                min_length=item.get("min_length", 1),
+                max_length=item.get("max_length", 500),
+                tags=item.get("tags", []),
+                version=item.get("version", "1.0")
+            )
+            self.add(case)
+            count += 1
+        return count
+
+@dataclass
+class RegressionResult:
+    case_id: str
+    passed: bool
+    failure_reasons: List[str]
+    response: str
+
+class RegressionTester:
+    """回归测试执行器"""
+    
+    def _judge(self, case: RegressionCase, response: str) -> RegressionResult:
+        """规则判定"""
+        failure_reasons = []
+        
+        # 检查期望关键词
+        for kw in case.expected_keywords:
+            if kw not in response:
+                failure_reasons.append(f"missing_keyword:{kw}")
+        
+        # 检查禁止关键词
+        for kw in case.forbidden_keywords:
+            if kw in response:
+                failure_reasons.append(f"forbidden_keyword:{kw}")
+        
+        # 检查长度
+        if len(response) < case.min_length:
+            failure_reasons.append(f"too_short")
+        if len(response) > case.max_length:
+            failure_reasons.append(f"too_long")
+        
+        return RegressionResult(
+            case_id=case.id,
+            passed=len(failure_reasons) == 0,
+            failure_reasons=failure_reasons,
+            response=response
+        )
+    
+    def run(self, library: RegressionLibrary, api_func: Callable) -> List[RegressionResult]:
+        """执行测试"""
+        results = []
+        for case in library._cases.values():
+            response = api_func(case.prompt)
+            result = self._judge(case, response)
+            results.append(result)
+        return results
+    
+    def ab_compare(self, library: RegressionLibrary, api_a: Callable, api_b: Callable) -> Dict:
+        """A/B 对比"""
+        results_a = self.run(library, api_a)
+        results_b = self.run(library, api_b)
+        
+        regressions = 0
+        improvements = 0
+        unchanged = 0
+        
+        for ra, rb in zip(results_a, results_b):
+            if ra.passed and not rb.passed:
+                regressions += 1
+            elif not ra.passed and rb.passed:
+                improvements += 1
+            else:
+                unchanged += 1
+        
+        return {
+            "regressions": regressions,
+            "improvements": improvements,
+            "unchanged": unchanged,
+            "total": len(results_a),
+            "rate_a": sum(1 for r in results_a if r.passed) / len(results_a),
+            "rate_b": sum(1 for r in results_b if r.passed) / len(results_b)
+        }
+    
+    def gating_check(self, results: List[RegressionResult], threshold: float = 0.95) -> bool:
+        """门禁检查"""
+        pass_count = sum(1 for r in results if r.passed)
+        pass_rate = pass_count / len(results)
+        return pass_rate >= threshold
+
+# 使用示例
+library = RegressionLibrary()
+
+# 添加测试用例
+case1 = RegressionCase(
+    category=CaseCategory.FUNCTIONAL,
+    prompt="1+1=?",
+    expected_keywords=["2"],
+    tags=["math", "simple"]
+)
+case_id = library.add(case1)
+print(f"添加用例: {case_id}")
+
+# 导出导入
+json_data = library.export_json()
+new_library = RegressionLibrary()
+new_library.import_json(json_data)
+print(f"导入用例数: {len(new_library._cases)}")
+
+# 运行测试（模拟 API 调用）
+tester = RegressionTester()
+mock_api = lambda p: "2" if "1+1" in p else "unknown"
+results = tester.run(library, mock_api)
+print(f"测试结果: {sum(1 for r in results if r.passed)}/{len(results)} 通过")
+
+# A/B 对比
+mock_api_b = lambda p: "答案是 2" if "1+1" in p else "unknown"
+ab_result = tester.ab_compare(library, mock_api, mock_api_b)
+print(f"A/B 对比: {ab_result}")
+```
+
+---
+
+## 练习题
+
+### 练习题 1：实现语义相似度匹配
+
+**要求：**
+增强回归测试器，支持语义相似度匹配。
+
+**步骤：**
+1. 集成语义相似度计算库（如 sentence-transformers）
+2. 修改 `_judge` 方法，支持语义匹配模式
+3. 添加相似度阈值参数
+4. 测试语义匹配效果
+
+### 练习题 2：实现测试报告生成器
+
+**要求：**
+实现一个测试报告生成器，生成美观的 HTML 报告。
+
+**步骤：**
+1. 设计报告模板
+2. 实现报告生成函数
+3. 包含通过率、失败原因分布、趋势图表
+4. 生成可浏览的 HTML 报告
+
+### 练习题 3：实现自动化测试流水线
+
+**要求：**
+实现一个完整的自动化测试流水线。
+
+**步骤：**
+1. 监听代码仓库变更
+2. 自动触发回归测试
+3. 生成测试报告
+4. 根据门禁规则决定是否允许部署
+5. 发送测试结果通知
+
+---

@@ -6,6 +6,17 @@
 
 ---
 
+## 学习目标
+
+通过学习本章节，你将能够：
+1. 深入理解 messages 数据结构，掌握 system / user / assistant 三种 role 的职责和使用规范
+2. 设计并执行请求格式测试，验证 API 对各种边界情况的容错能力
+3. 建立完整的错误分类体系，能够根据 HTTP 状态码判断错误类型并采取相应措施
+4. 实现错误决策树，理解什么错误需要重试、什么错误需要告警、什么错误需要转人工
+5. 掌握 HTTP 协议基础知识和 RESTful API 调用机制
+
+---
+
 ## 一、今日学习目标
 
 | 目标 | 说明 |
@@ -929,6 +940,200 @@ cd ai_test_env
 # 注意：error_classifier.py 放在 utils/ 目录下
 python tests/test_request_format.py
 ```
+
+---
+
+## 面试题
+
+### 面试题 1：如何设计一个生产级别的 AI 接口错误处理系统？
+
+**参考答案：**
+
+一个生产级别的 AI 接口错误处理系统需要包含以下核心组件：
+
+1. **错误分类引擎**：
+```python
+class ErrorClassifier:
+    """
+    错误分类器 - 核心决策组件
+    根据 HTTP 状态码和错误类型进行分类
+    """
+    
+    RETRIABLE_STATUSES = {429, 500, 502, 503, 504}
+    CRITICAL_STATUSES = {401, 403}
+    
+    @classmethod
+    def classify(cls, error):
+        status = cls._extract_status(error)
+        
+        if status in cls.CRITICAL_STATUSES:
+            return {"action": "alert", "retry": False, "severity": "critical"}
+        elif status in cls.RETRIABLE_STATUSES:
+            return {"action": "retry", "retry": True, "severity": "medium"}
+        elif status and status < 500:
+            return {"action": "report", "retry": False, "severity": "low"}
+```
+
+2. **指数退避重试机制**：
+```python
+def retry_with_backoff(func, max_retries=3):
+    """指数退避重试"""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            if not ErrorClassifier.classify(e)["retry"]:
+                raise
+            
+            wait_time = 2 ** attempt  # 1s, 2s, 4s
+            time.sleep(wait_time)
+```
+
+3. **告警机制**：
+```python
+def handle_error(error):
+    result = ErrorClassifier.classify(error)
+    
+    if result["severity"] == "critical":
+        send_emergency_alert(result)  # 立即告警
+    elif result["severity"] == "high":
+        send_warning(result)  # 警告
+```
+
+4. **监控指标**：
+   - 各类型错误的发生频率
+   - 重试成功率
+   - 错误分布趋势
+
+**面试话术：**
+> "我设计的错误处理系统核心是三板斧：分类、决策、执行。ErrorClassifier 根据状态码判断错误类型，返回是否可重试、严重级别、建议操作。然后根据分类结果执行对应策略——critical 立即告警，retriable 指数退避重试，non-retriable 直接上报。这套体系让线上问题定位时间从 30 分钟降到了 5 分钟。"
+
+---
+
+### 面试题 2：在测试中如何验证 API 的容错能力？
+
+**参考答案：**
+
+API 的容错能力测试是确保系统稳定性的关键，需要从以下几个维度设计测试用例：
+
+1. **无效字段容错测试**：
+```python
+def test_extra_fields(client):
+    """测试 API 是否忽略额外字段"""
+    messages = [{
+        "role": "user",
+        "content": "你好",
+        "timestamp": 1234567890,  # 无效字段
+        "unknown_field": "test"     # 未知字段
+    }]
+    response = client.chat(messages)
+    assert len(client.get_reply_text(response)) > 0
+```
+
+2. **边界值容错测试**：
+```python
+def test_boundary_values(client):
+    """测试 API 对边界值的处理"""
+    # 空字符串
+    test_messages = [
+        {"role": "user", "content": ""},
+        {"role": "user", "content": "   "},  # 仅空白字符
+    ]
+```
+
+3. **格式异常容错测试**：
+```python
+def test_format_anomalies(client):
+    """测试格式异常的处理"""
+    # 缺少必需字段的场景
+    # 字段类型错误的场景
+    # 超大数值场景
+```
+
+4. **容错验证清单**：
+   - API 不应因额外字段而崩溃
+   - API 应对无效输入返回明确错误
+   - API 应记录未知字段用于排查
+
+**面试话术：**
+> "容错测试的核心是'想用户所想'——用户可能会传任何奇怪的参数。我的测试策略是：先测正常结构建立基线，再逐步破坏结构（缺字段、多字段、错字段），观察 API 的反应。好的是 API 忽略未知字段只处理有效数据，差的是直接 500 崩溃。容错能力直接影响用户体验和生产稳定性。"
+
+---
+
+## 练习题
+
+### 练习题 1：实现增强版错误分类器
+
+**题目：** 扩展 `ErrorClassifier` 类，添加以下功能：
+
+1. 添加 `timeout`（超时）错误的分类处理
+2. 添加 `rate_limit`（频率限制）错误的详细处理（包含 `Retry-After` 头解析）
+3. 添加批量错误统计功能（记录错误发生次数和频率）
+4. 添加错误历史记录和回溯功能
+
+**数据结构设计：**
+```python
+{
+    "total_errors": 100,
+    "by_type": {
+        "429": {"count": 50, "last_occurred": "2026-04-30T10:00:00"},
+        "500": {"count": 10, "last_occurred": "2026-04-30T09:30:00"},
+    },
+    "recent_errors": [
+        {"status": 429, "timestamp": "...", "retried": True}
+    ]
+}
+```
+
+---
+
+### 练习题 2：设计请求格式验证框架
+
+**题目：** 创建一个请求格式验证框架 `RequestValidator`，实现以下功能：
+
+1. **结构验证**：验证 messages 数组的完整性（role 有效性、顺序正确性）
+2. **内容验证**：验证 content 字段的类型、长度限制
+3. **安全验证**：检测潜在的 prompt injection 攻击
+4. **自动修复**：对可修复的格式问题进行自动修复
+
+**示例用法：**
+```python
+validator = RequestValidator()
+
+# 验证通过
+result = validator.validate(messages)
+print(result.is_valid)  # True
+
+# 检测到问题
+result = validator.validate(bad_messages)
+print(result.errors)  # ["role 顺序错误", "content 长度超限"]
+```
+
+---
+
+### 练习题 3：实现智能重试策略
+
+**题目：** 实现一个智能重试管理器 `SmartRetryManager`，包含：
+
+1. **自适应退避**：根据错误类型动态调整重试间隔
+2. **熔断器模式**：连续失败达到阈值后暂时停止请求
+3. **超时控制**：单次请求超时和总重试超时双重保护
+4. **结果缓存**：对确定性请求（如 temperature=0）实现结果缓存
+
+**熔断器状态机：**
+```
+CLOSED（正常）→ 失败次数超过阈值 → OPEN（熔断）
+                                              ↓
+                           等待恢复时间后 → HALF_OPEN（试探）
+                                              ↓
+                           试探成功 → CLOSED
+                           试探失败 → OPEN
+```
+
+**要求：**
+- 实现完整的单元测试
+- 记录重试次数、成功/失败率等指标
+- 支持配置化（最大重试次数、熔断阈值等）
 
 ---
 
